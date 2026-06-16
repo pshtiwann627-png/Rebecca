@@ -19,14 +19,8 @@ import {
 	HStack,
 	IconButton,
 	Modal,
-	ModalBody,
 	ModalCloseButton,
-	ModalContent,
-	ModalFooter,
-	ModalHeader,
 	ModalOverlay,
-	NumberInput,
-	NumberInputField,
 	Radio,
 	RadioGroup,
 	SimpleGrid,
@@ -49,10 +43,9 @@ import {
 	QuestionMarkCircleIcon,
 	SparklesIcon,
 } from "@heroicons/react/24/outline";
-import { DeleteConfirmPopover } from "../DeleteConfirmPopover";
 import { JsonEditor } from "components/JsonEditor";
-import type { CoreConfigTarget } from "contexts/CoreSettingsContext";
 import { shadowsocksMethods } from "constants/Proxies";
+import type { CoreConfigTarget } from "contexts/CoreSettingsContext";
 import {
 	type FC,
 	forwardRef,
@@ -92,6 +85,14 @@ import {
 	tlsUsageOptions,
 	tlsVersionOptions,
 } from "utils/inbounds";
+import { NumericInput } from "../common/NumericInput";
+import { DeleteConfirmPopover } from "../DeleteConfirmPopover";
+import {
+	XrayModalBody,
+	XrayModalContent,
+	XrayModalFooter,
+	XrayModalHeader,
+} from "../xray/XrayDialog";
 
 type Props = {
 	isOpen: boolean;
@@ -559,7 +560,15 @@ export const InboundFormModal: FC<Props> = ({
 		} else {
 			setPortError(null);
 		}
-	}, [existingInbounds, portValue, tagValue, t, isEditMode, targetIds, initialValue]);
+	}, [
+		existingInbounds,
+		portValue,
+		tagValue,
+		t,
+		isEditMode,
+		targetIds,
+		initialValue,
+	]);
 
 	const renderSockoptNumberInput = useCallback(
 		(name: keyof SockoptFormValues, label: string) => (
@@ -574,13 +583,11 @@ export const InboundFormModal: FC<Props> = ({
 								? field.value
 								: undefined;
 						return (
-							<NumberInput
+							<NumericInput
 								min={0}
 								value={numberInputValue ?? ""}
 								onChange={(valueString) => field.onChange(valueString)}
-							>
-								<NumberInputField />
-							</NumberInput>
+							/>
 						);
 					}}
 				/>
@@ -905,6 +912,72 @@ export const InboundFormModal: FC<Props> = ({
 		}
 	}, [currentProtocol, ensureVlessAuthBlocks, isOpen]);
 
+	const vlessAuthenticationSection =
+		currentProtocol === "vless" ? (
+			<Stack className="xray-dialog-section" spacing={3}>
+				<Text fontSize="sm" fontWeight="semibold">
+					{t("inbounds.vless.authentication", "Authentication")}
+				</Text>
+				<Controller
+					control={control}
+					name="vlessSelectedAuth"
+					render={({ field }) => (
+						<FormControl>
+							<FormLabel>
+								{t("inbounds.vless.authentication", "Authentication")}
+							</FormLabel>
+							<ChakraSelect
+								placeholder={t(
+									"inbounds.vless.authPlaceholder",
+									"Select authentication",
+								)}
+								value={field.value || ""}
+								onChange={async (event) => {
+									const value = event.target.value;
+									field.onChange(value);
+									await handleAuthSelection(value);
+								}}
+							>
+								<option value="">{t("common.none", "None")}</option>
+								{computedVlessAuthOptions.map((option) => (
+									<option key={option.value} value={option.value}>
+										{option.label}
+									</option>
+								))}
+							</ChakraSelect>
+						</FormControl>
+					)}
+				/>
+				<SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+					<FormControl>
+						<FormLabel>
+							{t("inbounds.vless.decryption", "Decryption")}
+						</FormLabel>
+						<Input {...register("vlessDecryption")} />
+					</FormControl>
+					<FormControl>
+						<FormLabel>
+							{t("inbounds.vless.encryption", "Encryption")}
+						</FormLabel>
+						<Input {...register("vlessEncryption")} />
+					</FormControl>
+				</SimpleGrid>
+				<HStack spacing={3}>
+					<Button
+						size="sm"
+						onClick={handleFetchAuthClick}
+						isLoading={vlessAuthLoading}
+						isDisabled={!vlessSelectedAuth}
+					>
+						{t("inbounds.vless.getKeys", "Get new keys")}
+					</Button>
+					<Button size="sm" variant="ghost" onClick={handleClearAuth}>
+						{t("inbounds.vless.clearKeys", "Clear")}
+					</Button>
+				</HStack>
+			</Stack>
+		) : null;
+
 	return (
 		<Modal
 			isOpen={isOpen}
@@ -913,20 +986,23 @@ export const InboundFormModal: FC<Props> = ({
 			scrollBehavior="inside"
 			isCentered
 		>
-			<ModalOverlay />
-			<ModalContent maxW={{ base: "95vw", md: "4xl" }}>
-				<ModalHeader>
+			<ModalOverlay bg="blackAlpha.400" backdropFilter="blur(8px)" />
+			<XrayModalContent
+				maxW={{ base: "95vw", md: "4xl" }}
+				className="inbound-form-modal"
+			>
+				<XrayModalHeader>
 					{mode === "create"
 						? t("inbounds.add", "Add inbound")
 						: mode === "clone"
 							? t("inbounds.cloneTitle", "Clone inbound")
 							: t("inbounds.edit", "Edit inbound")}
-				</ModalHeader>
+				</XrayModalHeader>
 				<ModalCloseButton />
-				<ModalBody>
+				<XrayModalBody>
 					<Tabs
-						variant="enclosed"
-						colorScheme="primary"
+						className="xray-dialog-auto-sections"
+						variant="unstyled"
 						index={activeTab}
 						onChange={(index) => setActiveTab(index)}
 					>
@@ -938,13 +1014,10 @@ export const InboundFormModal: FC<Props> = ({
 						<TabPanels>
 							<TabPanel px={0}>
 								<VStack align="stretch" spacing={6}>
-									<Stack
-										spacing={4}
-										borderWidth="1px"
-										borderColor={sectionBorder}
-										borderRadius="lg"
-										p={4}
-									>
+									<Stack className="xray-dialog-section" spacing={3}>
+										<Text fontSize="sm" fontWeight="semibold">
+											{t("inbounds.basicSettings", "Basic settings")}
+										</Text>
 										<SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
 											<FormControl isRequired isInvalid={!!tagError}>
 												<FormLabel>{t("inbounds.tag", "Tag")}</FormLabel>
@@ -1083,79 +1156,6 @@ export const InboundFormModal: FC<Props> = ({
 													</FormLabel>
 													<Switch {...register("shadowsocksIvCheck")} />
 												</FormControl>
-											</Stack>
-										)}
-										{currentProtocol === "vless" && (
-											<Stack spacing={3}>
-												<Controller
-													control={control}
-													name="vlessSelectedAuth"
-													render={({ field }) => (
-														<FormControl>
-															<FormLabel>
-																{t(
-																	"inbounds.vless.authentication",
-																	"Authentication",
-																)}
-															</FormLabel>
-															<ChakraSelect
-																placeholder={t(
-																	"inbounds.vless.authPlaceholder",
-																	"Select authentication",
-																)}
-																value={field.value || ""}
-																onChange={async (event) => {
-																	const value = event.target.value;
-																	field.onChange(value);
-																	await handleAuthSelection(value);
-																}}
-															>
-																<option value="">
-																	{t("common.none", "None")}
-																</option>
-																{computedVlessAuthOptions.map((option) => (
-																	<option
-																		key={option.value}
-																		value={option.value}
-																	>
-																		{option.label}
-																	</option>
-																))}
-															</ChakraSelect>
-														</FormControl>
-													)}
-												/>
-												<SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-													<FormControl>
-														<FormLabel>
-															{t("inbounds.vless.decryption", "Decryption")}
-														</FormLabel>
-														<Input {...register("vlessDecryption")} />
-													</FormControl>
-													<FormControl>
-														<FormLabel>
-															{t("inbounds.vless.encryption", "Encryption")}
-														</FormLabel>
-														<Input {...register("vlessEncryption")} />
-													</FormControl>
-												</SimpleGrid>
-												<HStack spacing={3}>
-													<Button
-														size="sm"
-														onClick={handleFetchAuthClick}
-														isLoading={vlessAuthLoading}
-														isDisabled={!vlessSelectedAuth}
-													>
-														{t("inbounds.vless.getKeys", "Get new keys")}
-													</Button>
-													<Button
-														size="sm"
-														variant="ghost"
-														onClick={handleClearAuth}
-													>
-														{t("inbounds.vless.clearKeys", "Clear")}
-													</Button>
-												</HStack>
 											</Stack>
 										)}
 										{currentProtocol === "http" && (
@@ -1370,13 +1370,10 @@ export const InboundFormModal: FC<Props> = ({
 									</Stack>
 
 									{supportsStreamSettings && (
-										<Stack
-											spacing={4}
-											borderWidth="1px"
-											borderColor={sectionBorder}
-											borderRadius="lg"
-											p={4}
-										>
+										<Stack className="xray-dialog-section" spacing={3}>
+											<Text fontSize="sm" fontWeight="semibold">
+												{t("inbounds.streamSettings", "Stream settings")}
+											</Text>
 											<SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
 												<FormControl>
 													<FormLabel>
@@ -1849,13 +1846,13 @@ export const InboundFormModal: FC<Props> = ({
 											</FormControl>
 											<Collapse in={Boolean(sockoptEnabled)} animateOpacity>
 												<Stack
-													spacing={4}
-													borderWidth="1px"
-													borderColor={sectionBorder}
-													borderRadius="md"
-													p={4}
+													className="xray-dialog-section"
+													spacing={3}
 													mt={2}
 												>
+													<Text fontSize="sm" fontWeight="semibold">
+														{t("inbounds.sockopt.title", "Sockopt")}
+													</Text>
 													<SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
 														{renderSockoptNumberInput(
 															"mark",
@@ -2011,14 +2008,16 @@ export const InboundFormModal: FC<Props> = ({
 											</Collapse>
 										</Stack>
 									)}
+
+									{streamSecurity !== "tls" &&
+										streamSecurity !== "reality" &&
+										vlessAuthenticationSection}
+
 									{streamSecurity === "tls" && (
-										<Stack
-											spacing={4}
-											borderWidth="1px"
-											borderColor={sectionBorder}
-											borderRadius="lg"
-											p={4}
-										>
+										<Stack className="xray-dialog-section" spacing={3}>
+											<Text fontSize="sm" fontWeight="semibold">
+												{t("inbounds.tls.title", "TLS settings")}
+											</Text>
 											<SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
 												<FormControl>
 													<FormLabel>
@@ -2384,14 +2383,13 @@ export const InboundFormModal: FC<Props> = ({
 										</Stack>
 									)}
 
+									{streamSecurity === "tls" && vlessAuthenticationSection}
+
 									{streamSecurity === "reality" && (
-										<Stack
-											spacing={4}
-											borderWidth="1px"
-											borderColor={sectionBorder}
-											borderRadius="lg"
-											p={4}
-										>
+										<Stack className="xray-dialog-section" spacing={3}>
+											<Text fontSize="sm" fontWeight="semibold">
+												{t("inbounds.reality.title", "Reality settings")}
+											</Text>
 											<FormControl display="flex" alignItems="center">
 												<FormLabel mb={0}>
 													{t("inbounds.reality.show", "Show")}
@@ -2406,13 +2404,11 @@ export const InboundFormModal: FC<Props> = ({
 													control={control}
 													name="realityXver"
 													render={({ field }) => (
-														<NumberInput
+														<NumericInput
 															value={field.value ?? ""}
 															onChange={(value) => field.onChange(value)}
 															min={0}
-														>
-															<NumberInputField />
-														</NumberInput>
+														/>
 													)}
 												/>
 											</FormControl>
@@ -2493,7 +2489,7 @@ export const InboundFormModal: FC<Props> = ({
 												<Box fontSize="sm" color="gray.500">
 													{t(
 														"inbounds.serverNamesHint",
-														"Separate entries with commas or new lines.",
+														"Separate entries with commas.",
 													)}
 												</Box>
 												{errors.realityServerNames && (
@@ -2513,13 +2509,11 @@ export const InboundFormModal: FC<Props> = ({
 													control={control}
 													name="realityMaxTimediff"
 													render={({ field }) => (
-														<NumberInput
+														<NumericInput
 															value={field.value ?? ""}
 															onChange={(value) => field.onChange(value)}
 															min={0}
-														>
-															<NumberInputField />
-														</NumberInput>
+														/>
 													)}
 												/>
 											</FormControl>
@@ -2566,7 +2560,7 @@ export const InboundFormModal: FC<Props> = ({
 														</Tooltip>
 													</HStack>
 												</FormLabel>
-												<Textarea rows={2} {...register("realityShortIds")} />
+												<Input {...register("realityShortIds")} />
 												<Button
 													size="xs"
 													mt={2}
@@ -2582,7 +2576,7 @@ export const InboundFormModal: FC<Props> = ({
 												<Box fontSize="sm" color="gray.500">
 													{t(
 														"inbounds.shortIdsHint",
-														"Separate entries with commas or new lines.",
+														"Separate entries with commas.",
 													)}
 												</Box>
 												{errors.realityShortIds && (
@@ -2604,7 +2598,7 @@ export const InboundFormModal: FC<Props> = ({
 														"Reality public key",
 													)}
 												</FormLabel>
-												<Textarea rows={2} {...register("realityPublicKey")} />
+												<Input {...register("realityPublicKey")} />
 											</FormControl>
 											<FormControl
 												isRequired
@@ -2616,8 +2610,7 @@ export const InboundFormModal: FC<Props> = ({
 														"Reality private key",
 													)}
 												</FormLabel>
-												<Textarea
-													rows={2}
+												<Input
 													{...register("realityPrivateKey", { required: true })}
 												/>
 												{errors.realityPrivateKey && (
@@ -2645,10 +2638,7 @@ export const InboundFormModal: FC<Props> = ({
 												<FormLabel>
 													{t("inbounds.reality.mldsa65Seed", "ML-DSA-65 seed")}
 												</FormLabel>
-												<Textarea
-													rows={2}
-													{...register("realityMldsa65Seed")}
-												/>
+												<Input {...register("realityMldsa65Seed")} />
 											</FormControl>
 											<FormControl>
 												<FormLabel>
@@ -2657,10 +2647,7 @@ export const InboundFormModal: FC<Props> = ({
 														"ML-DSA-65 verify",
 													)}
 												</FormLabel>
-												<Textarea
-													rows={2}
-													{...register("realityMldsa65Verify")}
-												/>
+												<Input {...register("realityMldsa65Verify")} />
 											</FormControl>
 											<HStack spacing={3}>
 												<Button size="xs" onClick={handleGenerateMldsa65}>
@@ -2680,14 +2667,10 @@ export const InboundFormModal: FC<Props> = ({
 										</Stack>
 									)}
 
+									{streamSecurity === "reality" && vlessAuthenticationSection}
+
 									{supportsFallback && (
-										<Stack
-											spacing={3}
-											borderWidth="1px"
-											borderColor={sectionBorder}
-											borderRadius="lg"
-											p={4}
-										>
+										<Stack className="xray-dialog-section" spacing={3}>
 											<Flex align="center" justify="space-between">
 												<Box fontWeight="medium">
 													{t("inbounds.fallbacks", "Fallbacks")}
@@ -2793,13 +2776,7 @@ export const InboundFormModal: FC<Props> = ({
 										</Stack>
 									)}
 
-									<Stack
-										spacing={4}
-										borderWidth="1px"
-										borderColor={sectionBorder}
-										borderRadius="lg"
-										p={4}
-									>
+									<Stack className="xray-dialog-section" spacing={3}>
 										<Flex align="center" justify="space-between">
 											<HStack spacing={2}>
 												<Box fontWeight="medium">
@@ -2930,8 +2907,8 @@ export const InboundFormModal: FC<Props> = ({
 							</TabPanel>
 						</TabPanels>
 					</Tabs>
-				</ModalBody>
-				<ModalFooter
+				</XrayModalBody>
+				<XrayModalFooter
 					justifyContent={isEditMode && onDelete ? "space-between" : "flex-end"}
 				>
 					{isEditMode && onDelete && (
@@ -2997,8 +2974,8 @@ export const InboundFormModal: FC<Props> = ({
 							</>
 						)}
 					</HStack>
-				</ModalFooter>
-			</ModalContent>
+				</XrayModalFooter>
+			</XrayModalContent>
 		</Modal>
 	);
 };

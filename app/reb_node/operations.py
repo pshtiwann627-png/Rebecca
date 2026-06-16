@@ -557,17 +557,26 @@ def register_node_runtime_error(node_id: int, error: str, *, fallback_name: str 
 def _connect_node_impl(node_id: int, config=None, *, force: bool = False) -> None:
     global _connecting_nodes
 
-    if not force and _connecting_nodes.get(node_id):
+    if _connecting_nodes.get(node_id):
         return
+    _connecting_nodes[node_id] = True
 
     with GetDB() as db:
         dbnode = crud.get_node_by_id(db, node_id)
 
     if not dbnode:
+        try:
+            del _connecting_nodes[node_id]
+        except KeyError:
+            pass
         return
 
     if dbnode.status in (NodeStatus.disabled, NodeStatus.limited):
         logger.info("Skipping connect for %s node %s", dbnode.status, dbnode.name)
+        try:
+            del _connecting_nodes[node_id]
+        except KeyError:
+            pass
         return
 
     if force:
@@ -598,8 +607,6 @@ def _connect_node_impl(node_id: int, config=None, *, force: bool = False) -> Non
         node = add_node(dbnode)
 
     try:
-        _connecting_nodes[node_id] = True
-
         _change_node_status(node_id, NodeStatus.connecting)
         logger.info('Connecting to "%s" node', dbnode.name)
 

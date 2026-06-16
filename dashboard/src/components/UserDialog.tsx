@@ -21,10 +21,7 @@ import {
 	InputRightAddon,
 	InputRightElement,
 	Modal,
-	ModalBody,
 	ModalCloseButton,
-	ModalContent,
-	ModalFooter,
 	ModalHeader,
 	ModalOverlay,
 	Select,
@@ -40,7 +37,9 @@ import {
 	Text,
 	Textarea,
 	Tooltip,
+	useBreakpointValue,
 	useColorMode,
+	useColorModeValue,
 	useToast,
 	VStack,
 } from "@chakra-ui/react";
@@ -49,7 +48,6 @@ import {
 	CheckIcon,
 	ClipboardIcon,
 	ChevronDownIcon as HeroChevronDownIcon,
-	ChevronUpIcon,
 	LinkIcon,
 	LockClosedIcon,
 	PencilIcon,
@@ -80,31 +78,41 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
 
 import { getPanelSettings } from "service/settings";
-import { AdminRole, UserPermissionToggle } from "types/Admin";
+import {
+	AdminRole,
+	AdminTrafficLimitMode,
+	UserPermissionToggle,
+} from "types/Admin";
 import type {
 	User,
 	UserCreate,
 	UserCreateWithService,
 	UserListItem,
 } from "types/User";
-import { getConfigLabelFromLink } from "utils/configLabel";
-import { relativeExpiryDate } from "utils/dateFormatter";
-import { formatBytes } from "utils/formatByte";
 import {
 	canDeleteUserByTrafficCap,
 	canViewUserTraffic,
+	getAdminTrafficScope,
 	isUserManagementLocked,
 } from "utils/adminTraffic";
+import { getConfigLabelFromLink } from "utils/configLabel";
+import { relativeExpiryDate } from "utils/dateFormatter";
+import { formatBytes } from "utils/formatByte";
 import { generateUserLinks } from "utils/userLinks";
 
 import { z } from "zod";
+import { NumericInput } from "./common/NumericInput";
 import { DateTimePicker } from "./DateTimePicker";
 import { DeleteConfirmPopover } from "./DeleteConfirmPopover";
 import { DeleteIcon } from "./DeleteUserModal";
 import { Icon } from "./Icon";
 import { Input } from "./Input";
-
 import { createUsageConfig, UsageFilter } from "./UsageFilter";
+import {
+	XrayModalBody,
+	XrayModalContent,
+	XrayModalFooter,
+} from "./xray/XrayDialog";
 
 const AddUserIcon = chakra(UserPlusIcon, {
 	baseStyle: {
@@ -646,6 +654,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
 
 	const { t, i18n } = useTranslation();
 	const isRTL = i18n.dir(i18n.language) === "rtl";
+	const isMobileDialog =
+		useBreakpointValue({ base: true, md: false }) ?? false;
 	const DATA_UNIT = "GB";
 	const DAYS_UNIT = t("userDialog.days", "Days");
 	const basePad = "0.75rem";
@@ -667,6 +677,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
 			};
 
 	const { colorMode } = useColorMode();
+	const footerBg = useColorModeValue("white", "gray.900");
+	const footerBorderColor = useColorModeValue("gray.200", "whiteAlpha.300");
 
 	const UNIT_RADIUS = "6px";
 
@@ -678,74 +690,35 @@ export const UserDialog: FC<UserDialogProps> = () => {
 		placeholder?: string;
 		type?: string;
 		inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"];
-		onStep?: (delta: number) => void;
 	}) => {
 		const addonBg = colorMode === "dark" ? "whiteAlpha.100" : "blackAlpha.50";
 		const addonBorder = colorMode === "dark" ? "gray.700" : "gray.200";
 		const addonColor = colorMode === "dark" ? "gray.200" : "gray.600";
 
 		return (
-			<InputGroup size="sm" dir="ltr" w="full" h="32px">
-				<Box position="relative" flex="1" h="32px" minW={0}>
-					<ChakraInput
+			<InputGroup size="sm" dir="ltr" w="full" minW={0}>
+				<Box flex="1" minW={0}>
+					<NumericInput
 						value={args.value}
-						onChange={args.onChange}
-						placeholder={args.placeholder}
-						type={args.type ?? "text"}
-						inputMode={args.inputMode ?? "decimal"}
 						isDisabled={args.disabled}
-						borderRadius={UNIT_RADIUS}
-						borderEndRadius="0"
-						h="32px"
-						minH="32px"
-						dir="ltr"
-						textAlign={isRTL ? "right" : "left"}
-						pr={args.onStep ? "2.5rem" : undefined}
+						min={0}
+						step={1}
+						onChange={(valueAsString) => {
+							args.onChange({
+								target: { value: valueAsString },
+							} as ChangeEvent<HTMLInputElement>);
+						}}
+						fieldProps={{
+							placeholder: args.placeholder,
+							inputMode: args.inputMode ?? "decimal",
+							borderRadius: UNIT_RADIUS,
+							borderEndRadius: "0",
+							h: "32px",
+							minH: "32px",
+							dir: "ltr",
+							textAlign: isRTL ? "right" : "left",
+						}}
 					/>
-
-					{args.onStep && (
-						<Flex
-							position="absolute"
-							insetInlineEnd="1px"
-							top="1px"
-							bottom="1px"
-							h="30px"
-							borderInlineStartWidth="1px"
-							borderColor={addonBorder}
-							bg={addonBg}
-							direction="column"
-							w="28px"
-							overflow="hidden"
-							zIndex={1}
-						>
-							<IconButton
-								aria-label={t("common.increment", "Increase")}
-								icon={<ChevronUpIcon width={11} />}
-								variant="ghost"
-								size="xs"
-								minW="auto"
-								minH="0"
-								h="50%"
-								p={0}
-								borderRadius="0"
-								isDisabled={args.disabled}
-								onClick={() => args.onStep?.(1)}
-							/>
-							<IconButton
-								aria-label={t("common.decrement", "Decrease")}
-								icon={<HeroChevronDownIcon width={11} />}
-								variant="ghost"
-								size="xs"
-								minW="auto"
-								minH="0"
-								h="50%"
-								p={0}
-								borderRadius="0"
-								isDisabled={args.disabled}
-								onClick={() => args.onStep?.(-1)}
-							/>
-						</Flex>
-					)}
 				</Box>
 
 				<InputRightAddon
@@ -775,19 +748,6 @@ export const UserDialog: FC<UserDialogProps> = () => {
 		mode: "onChange",
 		reValidateMode: "onChange",
 	});
-
-	const stepDataLimit = useCallback(
-		(currentValue: unknown, delta: number) => {
-			const parsed = parseDecimalInput(currentValue);
-			const base = Number.isFinite(parsed) && parsed !== null ? parsed : 0;
-			const nextValue = Math.max(0, base + delta);
-			form.setValue("data_limit", nextValue, {
-				shouldDirty: true,
-				shouldValidate: true,
-			});
-		},
-		[form],
-	);
 
 	const manualKeyEntryEnabled = useWatch({
 		control: form.control,
@@ -1023,9 +983,6 @@ export const UserDialog: FC<UserDialogProps> = () => {
 	const canSetCustomKey =
 		hasPrivilegedRole ||
 		Boolean(userData.permissions?.users?.[UserPermissionToggle.AllowCustomKey]);
-	const canCreateUsers =
-		hasFullAccess ||
-		Boolean(userData.permissions?.users?.[UserPermissionToggle.Create]);
 	const canDeleteUsers =
 		hasFullAccess ||
 		Boolean(userData.permissions?.users?.[UserPermissionToggle.Delete]);
@@ -1052,8 +1009,35 @@ export const UserDialog: FC<UserDialogProps> = () => {
 	const selectedService = selectedServiceId
 		? (services.find((service) => service.id === selectedServiceId) ?? null)
 		: null;
-	const isServiceManagedUser = Boolean(editingUser?.service_id);
 	const nonSudoSingleService = !hasPrivilegedRole && services.length === 1;
+	const getEffectiveServiceId = useCallback(() => {
+		if (isEditing) {
+			return editingUser?.service_id ?? null;
+		}
+		if (hasPrivilegedRole) {
+			return selectedServiceId;
+		}
+		return (
+			selectedServiceId ??
+			(nonSudoSingleService ? (services[0]?.id ?? null) : null)
+		);
+	}, [
+		editingUser?.service_id,
+		hasPrivilegedRole,
+		isEditing,
+		nonSudoSingleService,
+		selectedServiceId,
+		services,
+	]);
+	const currentTrafficScope = getAdminTrafficScope(
+		userData,
+		getEffectiveServiceId(),
+	);
+	const isCreatedTrafficScope = Boolean(
+		currentTrafficScope?.traffic_limit_mode ===
+			AdminTrafficLimitMode.CreatedTraffic && !hasPrivilegedRole,
+	);
+	const isServiceManagedUser = Boolean(editingUser?.service_id);
 	const showServiceSelector = hasPrivilegedRole || services.length !== 1;
 	const useTwoColumns = showServiceSelector && services.length > 0;
 	const shouldCenterForm = !useTwoColumns;
@@ -1557,6 +1541,38 @@ export const UserDialog: FC<UserDialogProps> = () => {
 
 		// data_limit from schema is already in bytes
 		const dataLimitBytes = data_limit || 0;
+		const setDataLimitError = (message: string) => {
+			setError(message);
+			setLoading(false);
+			form.setError("data_limit", {
+				type: "manual",
+				message,
+			});
+		};
+
+		if (isCreatedTrafficScope && dataLimitBytes <= 0) {
+			setDataLimitError(
+				t(
+					"userDialog.createdTrafficUnlimitedNotAllowed",
+					"Unlimited data is not allowed while your admin traffic mode is created traffic.",
+				),
+			);
+			return;
+		}
+
+		if (isCreatedTrafficScope && isEditing && editingUser) {
+			const usedTraffic = Math.max(0, editingUser.used_traffic ?? 0);
+			if (dataLimitBytes > 0 && dataLimitBytes < usedTraffic) {
+				setDataLimitError(
+					t("userDialog.dataLimitBelowUsedTraffic", {
+						used: formatBytes(usedTraffic, 2),
+						defaultValue:
+							"Data limit cannot be lower than this user's used traffic ({{used}}).",
+					}),
+				);
+				return;
+			}
+		}
 
 		if (maxDataLimitPerUser !== null && maxDataLimitPerUser !== undefined) {
 			// If unlimited (0) is requested but not allowed, show error
@@ -1565,12 +1581,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
 				const errorMessage = t("userDialog.unlimitedNotAllowed", {
 					max: maxGb,
 				});
-				setError(errorMessage);
-				setLoading(false);
-				form.setError("data_limit", {
-					type: "manual",
-					message: errorMessage,
-				});
+				setDataLimitError(errorMessage);
 				return;
 			}
 			// If exceeds max limit, show error
@@ -1581,12 +1592,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
 					original: originalGb,
 					max: maxGb,
 				});
-				setError(errorMessage);
-				setLoading(false);
-				form.setError("data_limit", {
-					type: "manual",
-					message: errorMessage,
-				});
+				setDataLimitError(errorMessage);
 				return;
 			}
 		}
@@ -1979,7 +1985,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
 	};
 
 	const disabled = loading || limitReached || userManagementLocked;
-	const serviceSelectionDisabled = disabled || (isEditing && requiresServiceScope);
+	const serviceSelectionDisabled =
+		disabled || (isEditing && requiresServiceScope);
 	const submitDisabled = disabled || !form.formState.isValid;
 
 	const isOnHold = userStatus === "on_hold";
@@ -2013,15 +2020,25 @@ export const UserDialog: FC<UserDialogProps> = () => {
 		<Modal
 			isOpen={isOpen}
 			onClose={onClose}
-			size={shouldCompactModal ? "lg" : "2xl"}
+			size={isMobileDialog ? "full" : shouldCompactModal ? "lg" : "2xl"}
+			scrollBehavior="inside"
 		>
 			<ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
 
 			<FormProvider {...form}>
-				<ModalContent
-					mx="3"
+				<XrayModalContent
+					mx={{ base: 0, md: 3 }}
+					my={{ base: 0, md: "3.75rem" }}
 					position="relative"
 					overflow="hidden"
+					h={{ base: "var(--rb-dialog-viewport-height, 100dvh)", md: "auto" }}
+					maxH={{
+						base: "var(--rb-dialog-viewport-height, 100dvh)",
+						md: "calc(100vh - 48px)",
+					}}
+					borderRadius={{ base: 0, md: "md" }}
+					display="flex"
+					flexDirection="column"
 					dir={isRTL ? "rtl" : "ltr"}
 				>
 					<ModalCloseButton
@@ -2042,10 +2059,23 @@ export const UserDialog: FC<UserDialogProps> = () => {
 						pointerEvents={limitReached ? "none" : "auto"}
 						filter={limitReached ? "blur(6px)" : "none"}
 						transition="filter 0.2s ease"
+						minH={0}
+						flex="1"
+						display="flex"
+						flexDirection="column"
 					>
-						<form onSubmit={form.handleSubmit(submit)}>
+						<form
+							onSubmit={form.handleSubmit(submit)}
+							style={{
+								minHeight: 0,
+								flex: 1,
+								display: "flex",
+								flexDirection: "column",
+							}}
+						>
 							<ModalHeader
-								pt={6}
+								px={{ base: 4, md: 5 }}
+								py={3}
 								pe={12}
 								position="relative"
 								display="flex"
@@ -2072,7 +2102,18 @@ export const UserDialog: FC<UserDialogProps> = () => {
 								</Text>
 							</ModalHeader>
 
-							<ModalBody>
+							<XrayModalBody
+								flex="1"
+								minH={0}
+								overflowY="auto"
+								overflowX="hidden"
+								px={{ base: 3, sm: 4, md: 5 }}
+								py={{ base: 3, md: 4 }}
+								sx={{
+									WebkitOverflowScrolling: "touch",
+									overscrollBehavior: "contain",
+								}}
+							>
 								{isEditing && isServiceManagedUser && (
 									<SlideFade
 										in={serviceNoticeVisible}
@@ -2207,18 +2248,31 @@ export const UserDialog: FC<UserDialogProps> = () => {
 									isLazy
 									w="full"
 								>
-									<TabList>
-										<Tab>{t("userDialog.tabs.edit", "Edit")}</Tab>
+									<TabList
+										overflowX="auto"
+										overflowY="hidden"
+										whiteSpace="nowrap"
+										sx={{
+											scrollbarWidth: "none",
+											"&::-webkit-scrollbar": { display: "none" },
+										}}
+									>
+										<Tab flexShrink={0}>{t("userDialog.tabs.edit", "Edit")}</Tab>
 										{isEditing && canViewTraffic && (
-											<Tab>{t("userDialog.tabs.usage", "Usage")}</Tab>
+											<Tab flexShrink={0}>
+												{t("userDialog.tabs.usage", "Usage")}
+											</Tab>
 										)}
 										{isEditing && (
-											<Tab>{t("userDialog.tabs.links", "Links")}</Tab>
+											<Tab flexShrink={0}>
+												{t("userDialog.tabs.links", "Links")}
+											</Tab>
 										)}
 									</TabList>
 									<TabPanels>
 										<TabPanel px={0} pt={4}>
 											<Grid
+												className="xray-dialog-section user-dialog-edit-grid"
 												templateColumns={{
 													base: "repeat(1, 1fr)",
 													md: useTwoColumns
@@ -2436,13 +2490,6 @@ export const UserDialog: FC<UserDialogProps> = () => {
 																							: "",
 																						onChange: field.onChange,
 																						disabled,
-																						onStep: isEditing
-																							? (delta) =>
-																									stepDataLimit(
-																										field.value,
-																										delta,
-																									)
-																							: undefined,
 																					})}
 																					{isEditing && remainingDataInfo && (
 																						<FormHelperText
@@ -2904,7 +2951,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
 												{showServiceSelector && (
 													<GridItem mt={useTwoColumns ? 0 : 4}>
 														<FormControl
-															isRequired={!hasPrivilegedRole || requiresServiceScope}
+															isRequired={
+																!hasPrivilegedRole || requiresServiceScope
+															}
 														>
 															<FormLabel>
 																{t("userDialog.selectServiceLabel", "Service")}
@@ -2927,7 +2976,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
 																	{hasPrivilegedRole && (
 																		<Box
 																			role="button"
-																			tabIndex={serviceSelectionDisabled ? -1 : 0}
+																			tabIndex={
+																				serviceSelectionDisabled ? -1 : 0
+																			}
 																			aria-pressed={selectedServiceId === null}
 																			onKeyDown={(event) => {
 																				if (serviceSelectionDisabled) return;
@@ -2965,7 +3016,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
 																					: "pointer"
 																			}
 																			pointerEvents={
-																				serviceSelectionDisabled ? "none" : "auto"
+																				serviceSelectionDisabled
+																					? "none"
+																					: "auto"
 																			}
 																			transition="border-color 0.2s ease, background-color 0.2s ease"
 																			_hover={
@@ -4092,9 +4145,27 @@ export const UserDialog: FC<UserDialogProps> = () => {
 										)}
 									</TabPanels>
 								</Tabs>
-							</ModalBody>
+							</XrayModalBody>
 
-							<ModalFooter mt="3">
+							<XrayModalFooter
+								position={{ base: "sticky", md: "static" }}
+								bottom={0}
+								zIndex="sticky"
+								flexShrink={0}
+								bg={footerBg}
+								borderTopWidth="1px"
+								borderColor={footerBorderColor}
+								px={{ base: 3, sm: 4, md: 5 }}
+								pt={{ base: 2.5, md: 3 }}
+								pb={{
+									base: "var(--rb-dialog-safe-bottom)",
+									md: 3,
+								}}
+								boxShadow={{
+									base: "0 -14px 28px rgba(0, 0, 0, 0.28)",
+									md: "none",
+								}}
+							>
 								<HStack
 									justifyContent="space-between"
 									w="full"
@@ -4112,6 +4183,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
 
 											sm: "unset",
 										}}
+										spacing={2}
+										flexWrap="wrap"
 									>
 										{isEditing && (
 											<>
@@ -4124,7 +4197,10 @@ export const UserDialog: FC<UserDialogProps> = () => {
 														onConfirm={handleDeleteUser}
 													>
 														<Tooltip label={t("delete")} placement="top">
-															<IconButton aria-label="Delete" size="sm">
+															<IconButton
+																aria-label="Delete"
+																size={{ base: "md", sm: "sm" }}
+															>
 																<DeleteIcon />
 															</IconButton>
 														</Tooltip>
@@ -4132,13 +4208,21 @@ export const UserDialog: FC<UserDialogProps> = () => {
 												)}
 
 												{canResetUsageVisible && (
-													<Button onClick={handleResetUsage} size="sm">
+													<Button
+														onClick={handleResetUsage}
+														size={{ base: "md", sm: "sm" }}
+														flex={{ base: "1 1 auto", sm: "0 0 auto" }}
+													>
 														{t("userDialog.resetUsage")}
 													</Button>
 												)}
 
 												{canRevokeSubscriptionVisible && (
-													<Button onClick={handleRevokeSubscription} size="sm">
+													<Button
+														onClick={handleRevokeSubscription}
+														size={{ base: "md", sm: "sm" }}
+														flex={{ base: "1 1 auto", sm: "0 0 auto" }}
+													>
 														{t("userDialog.revokeSubscription")}
 													</Button>
 												)}
@@ -4150,20 +4234,29 @@ export const UserDialog: FC<UserDialogProps> = () => {
 										w="full"
 										maxW={{ md: "50%", base: "full" }}
 										justify="end"
+										flexShrink={0}
 									>
 										<Button
 											type="submit"
-											size="sm"
+											size={{ base: "md", sm: "sm" }}
 											px="8"
 											colorScheme="primary"
 											leftIcon={loading ? <Spinner size="xs" /> : undefined}
 											disabled={submitDisabled}
+											w={{ base: "full", sm: "auto" }}
+											minH={{ base: "44px", sm: "36px" }}
+											boxShadow={{ base: "sm", sm: "none" }}
+											_disabled={{
+												opacity: 0.65,
+												cursor: "not-allowed",
+												boxShadow: "none",
+											}}
 										>
 											{isEditing ? t("userDialog.editUser") : t("createUser")}
 										</Button>
 									</HStack>
 								</HStack>
-							</ModalFooter>
+							</XrayModalFooter>
 						</form>
 					</Box>
 
@@ -4200,7 +4293,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
 							</Text>
 						</Flex>
 					)}
-				</ModalContent>
+				</XrayModalContent>
 			</FormProvider>
 		</Modal>
 	);

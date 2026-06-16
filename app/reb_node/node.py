@@ -23,7 +23,11 @@ from websocket import (
 )
 
 from app.reb_node.config import XRayConfig
-from config import NODE_HEALTH_CACHE_SECONDS
+from config import (
+    JOB_RECORD_NODE_USAGE_COLLECT_TIMEOUT,
+    JOB_RECORD_USER_USAGE_COLLECT_TIMEOUT,
+    NODE_HEALTH_CACHE_SECONDS,
+)
 from xray_api import XRay as XRayAPI
 
 
@@ -218,6 +222,14 @@ def _extract_certificate_identity(pem_data: str) -> str | None:
         pass
 
     return None
+
+
+def _bounded_usage_timeout(value: int | None, fallback: int) -> int:
+    try:
+        timeout = int(value or 0)
+    except (TypeError, ValueError):
+        timeout = 0
+    return max(timeout or fallback, 1)
 
 
 def _select_root_certificate(pem_data: str) -> Optional[bytes]:
@@ -596,7 +608,13 @@ class ReSTXRayNode:
         self._set_health_cache(True, bool(version_res.get("started", False)))
 
     def disconnect(self):
-        self.make_request("/disconnect", timeout=60)
+        if not self._session_id:
+            self._api = None
+            self._started = False
+            self._set_health_cache(False, False)
+            return
+
+        self.make_request("/disconnect", timeout=60, report_runtime_error=False)
         self._session_id = None
         self._api = None
         self._started = False
@@ -769,7 +787,10 @@ class ReSTXRayNode:
     def collect_outbound_stats(self) -> dict:
         """Collect reset outbound stats through the node-side delivery buffer."""
         self._ensure_connected()
-        response = self.make_request("/usage/outbounds", timeout=45)
+        response = self.make_request(
+            "/usage/outbounds",
+            timeout=_bounded_usage_timeout(JOB_RECORD_NODE_USAGE_COLLECT_TIMEOUT, 45),
+        )
         if not isinstance(response, dict):
             raise NodeAPIError(0, "Invalid outbound usage response from node")
 
@@ -800,7 +821,10 @@ class ReSTXRayNode:
     def collect_user_stats(self) -> dict:
         """Collect reset user stats through the node-side delivery buffer."""
         self._ensure_connected()
-        response = self.make_request("/usage/users", timeout=60)
+        response = self.make_request(
+            "/usage/users",
+            timeout=_bounded_usage_timeout(JOB_RECORD_USER_USAGE_COLLECT_TIMEOUT, 60),
+        )
         if not isinstance(response, dict):
             raise NodeAPIError(0, "Invalid user usage response from node")
 

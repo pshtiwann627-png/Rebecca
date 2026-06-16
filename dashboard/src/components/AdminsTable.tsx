@@ -30,6 +30,7 @@ import {
 	ModalFooter,
 	ModalHeader,
 	ModalOverlay,
+	Portal,
 	SimpleGrid,
 	Skeleton,
 	Stack,
@@ -41,7 +42,6 @@ import {
 	Textarea,
 	Th,
 	Thead,
-	Tooltip,
 	Tr,
 	useBreakpointValue,
 	useClipboard,
@@ -55,6 +55,8 @@ import {
 	ArrowPathIcon,
 	CheckCircleIcon,
 	ChevronDownIcon,
+	ChevronRightIcon,
+	EllipsisVerticalIcon,
 	KeyIcon,
 	PencilIcon,
 	PlayIcon,
@@ -91,10 +93,16 @@ import {
 	generateSuccessMessage,
 } from "utils/toastHandler";
 import AdminPermissionsModal from "./AdminPermissionsModal";
-import { DeleteConfirmPopover } from "./DeleteConfirmPopover";
 
 const ADMIN_DATA_LIMIT_EXHAUSTED_REASON_KEY = "admin_data_limit_exhausted";
 const ADMIN_TIME_LIMIT_EXHAUSTED_REASON_KEY = "admin_time_limit_exhausted";
+const ADMIN_TRAFFIC_OPTIONS = [
+	{ label: "100GB", gigabytes: 100 },
+	{ label: "500GB", gigabytes: 500 },
+	{ label: "1TB", gigabytes: 1024 },
+	{ label: "2TB", gigabytes: 2048 },
+	{ label: "5TB", gigabytes: 5120 },
+];
 
 const iconProps = {
 	baseStyle: {
@@ -112,6 +120,13 @@ const EnableIcon = chakra(PlayIcon, iconProps);
 const DeleteIcon = chakra(TrashIcon, iconProps);
 const QuickPassIcon = chakra(KeyIcon, iconProps);
 const AddDataIcon = chakra(PlusCircleIcon, iconProps);
+const MoreIcon = chakra(EllipsisVerticalIcon, {
+	baseStyle: {
+		strokeWidth: "2px",
+		w: 4,
+		h: 4,
+	},
+});
 
 const createStableKey = () => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -158,6 +173,58 @@ const AdminStatusBadge: FC<{ status: AdminStatus }> = ({ status }) => {
 					: t("admins.disabledLabel", "Disabled")}
 			</Text>
 		</Box>
+	);
+};
+
+const AdminRoleBadge: FC<{ role: AdminRole }> = ({ role }) => {
+	const { t } = useTranslation();
+	const roleStyles = {
+		[AdminRole.FullAccess]: {
+			bg: "yellow.100",
+			color: "yellow.800",
+			darkBg: "yellow.900",
+			darkColor: "yellow.200",
+			label: t("admins.roles.fullAccess", "Full access"),
+		},
+		[AdminRole.Sudo]: {
+			bg: "purple.100",
+			color: "purple.800",
+			darkBg: "purple.900",
+			darkColor: "purple.200",
+			label: t("admins.roles.sudo", "Sudo"),
+		},
+		[AdminRole.Reseller]: {
+			bg: "blue.100",
+			color: "blue.800",
+			darkBg: "blue.900",
+			darkColor: "blue.200",
+			label: t("admins.roles.reseller", "Reseller"),
+		},
+		[AdminRole.Standard]: {
+			bg: "gray.100",
+			color: "gray.800",
+			darkBg: "gray.700",
+			darkColor: "gray.200",
+			label: t("admins.roles.standard", "Standard"),
+		},
+	}[role];
+
+	return (
+		<Text
+			as="span"
+			display="inline-flex"
+			fontSize="xs"
+			px={2}
+			py={0.5}
+			borderRadius="full"
+			bg={roleStyles.bg}
+			color={roleStyles.color}
+			fontWeight="medium"
+			w="fit-content"
+			_dark={{ bg: roleStyles.darkBg, color: roleStyles.darkColor }}
+		>
+			{roleStyles.label}
+		</Text>
 	);
 };
 
@@ -354,10 +421,16 @@ export const AdminsTable: FC<TableProps> = (props) => {
 		adminInDetails,
 	} = useAdminsStore();
 	const disableCancelRef = useRef<HTMLButtonElement | null>(null);
+	const deleteCancelRef = useRef<HTMLButtonElement | null>(null);
 	const {
 		isOpen: isDisableDialogOpen,
 		onOpen: openDisableDialog,
 		onClose: closeDisableDialog,
+	} = useDisclosure();
+	const {
+		isOpen: isDeleteDialogOpen,
+		onOpen: openDeleteDialog,
+		onClose: closeDeleteDialog,
 	} = useDisclosure();
 	const {
 		isOpen: isPermissionsModalOpen,
@@ -365,6 +438,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 		onClose: closePermissionsModal,
 	} = useDisclosure();
 	const [adminToDisable, setAdminToDisable] = useState<Admin | null>(null);
+	const [adminToDelete, setAdminToDelete] = useState<Admin | null>(null);
 	const [disableReason, setDisableReason] = useState("");
 	const [expandedMobile, setExpandedMobile] = useState<string | null>(null);
 	const [actionState, setActionState] = useState<{
@@ -373,7 +447,8 @@ export const AdminsTable: FC<TableProps> = (props) => {
 			| "resetDeleted"
 			| "disableAdmin"
 			| "enableAdmin"
-			| "quickPassword";
+			| "quickPassword"
+			| "deleteAdmin";
 		username: string;
 	} | null>(null);
 	const [adminForPermissions, setAdminForPermissions] = useState<Admin | null>(
@@ -553,8 +628,10 @@ export const AdminsTable: FC<TableProps> = (props) => {
 			await deleteAdmin(admin.username);
 			generateSuccessMessage(t("admins.deleteSuccess", "Admin removed"), toast);
 			fetchAdmins();
+			return true;
 		} catch (error) {
 			generateErrorMessage(error, toast);
+			return false;
 		}
 	};
 
@@ -615,6 +692,29 @@ export const AdminsTable: FC<TableProps> = (props) => {
 	const closeContextMenu = useCallback(() => {
 		setContextMenu({ visible: false, x: 0, y: 0, admin: null });
 	}, []);
+	const closeDeleteDialogAndReset = () => {
+		closeDeleteDialog();
+		setAdminToDelete(null);
+	};
+	const startDeleteAdmin = (admin: Admin) => {
+		setAdminToDelete(admin);
+		openDeleteDialog();
+		closeContextMenu();
+	};
+	const confirmDeleteAdmin = async () => {
+		if (!adminToDelete) {
+			return;
+		}
+		setActionState({ type: "deleteAdmin", username: adminToDelete.username });
+		try {
+			const deleted = await handleDeleteAdmin(adminToDelete);
+			if (deleted) {
+				closeDeleteDialogAndReset();
+			}
+		} finally {
+			setActionState(null);
+		}
+	};
 	const handleCloseQuickPass = () => {
 		setQuickPassInfo(null);
 		closeQuickPassModal();
@@ -723,7 +823,11 @@ export const AdminsTable: FC<TableProps> = (props) => {
 		}
 	};
 
-	const handleAddDataLimit = async (admin: Admin, gigabytes: number) => {
+	const handleAddDataLimit = async (
+		admin: Admin,
+		gigabytes: number,
+		onDone?: () => void,
+	) => {
 		if (
 			admin.data_limit === null ||
 			admin.data_limit === 0 ||
@@ -731,7 +835,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 		) {
 			return;
 		}
-		setContextAction("addData");
+		setContextAction(`addData-${gigabytes}`);
 		const delta = gigabytes * 1024 * 1024 * 1024;
 		const nextLimit = admin.data_limit + delta;
 		try {
@@ -745,6 +849,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 			generateErrorMessage(error, toast);
 		} finally {
 			setContextAction(null);
+			onDone?.();
 			closeContextMenu();
 		}
 	};
@@ -858,12 +963,266 @@ export const AdminsTable: FC<TableProps> = (props) => {
 		);
 	};
 
+	const formatByteLimit = (value?: number | null) =>
+		value && value > 0 ? formatBytes(value, 2) : "∞";
+	const getEnabledUserPermissionsCount = (admin: Admin) =>
+		Object.values(UserPermissionToggle).filter(
+			(permission) => admin.permissions?.users?.[permission],
+		).length;
+	const getAdminRowMeta = (admin: Admin) => {
+		const canManage = canManageAdminAccount(admin);
+		const canChangeStatus =
+			canManage && admin.username !== currentAdminUsername;
+		const hasDataLimitDisabledReason =
+			admin.disabled_reason === ADMIN_DATA_LIMIT_EXHAUSTED_REASON_KEY;
+		const hasTimeLimitDisabledReason =
+			admin.disabled_reason === ADMIN_TIME_LIMIT_EXHAUSTED_REASON_KEY;
+		const disabledReasonLabel = admin.disabled_reason
+			? hasDataLimitDisabledReason
+				? t(
+						"admins.disabledReason.dataLimitExceeded",
+						"Your data limit has been reached",
+					)
+				: hasTimeLimitDisabledReason
+					? t(
+							"admins.disabledReason.timeLimitExceeded",
+							"Your account time limit has expired",
+						)
+					: admin.disabled_reason
+			: null;
+		return {
+			canManage,
+			showDisable: canChangeStatus && admin.status !== AdminStatus.Disabled,
+			showEnable:
+				canChangeStatus &&
+				admin.status === AdminStatus.Disabled &&
+				!hasDataLimitDisabledReason &&
+				!hasTimeLimitDisabledReason,
+			showDelete: canChangeStatus,
+			showAddTraffic:
+				canManage &&
+				admin.data_limit !== null &&
+				admin.data_limit !== 0 &&
+				admin.data_limit !== undefined,
+			hasDataLimitDisabledReason,
+			hasTimeLimitDisabledReason,
+			disabledReasonLabel,
+		};
+	};
+	const renderAddTrafficSubmenu = (admin: Admin, onDone?: () => void) => (
+		<Box position="relative" role="group">
+			<Button
+				variant="ghost"
+				justifyContent="space-between"
+				w="full"
+				leftIcon={<AddDataIcon />}
+				rightIcon={
+					<ChevronRightIcon
+						width={14}
+						style={{
+							transform: isRTL ? "rotate(180deg)" : undefined,
+						}}
+					/>
+				}
+				isLoading={contextAction?.startsWith("addData-")}
+				isDisabled={contextAction?.startsWith("addData-")}
+			>
+				{t("admins.addTraffic", "Add traffic")}
+			</Button>
+			<Stack
+				display="none"
+				_groupHover={{ display: "flex" }}
+				_groupFocusWithin={{ display: "flex" }}
+				position="absolute"
+				top={0}
+				left={isRTL ? "auto" : "100%"}
+				right={isRTL ? "100%" : "auto"}
+				minW="120px"
+				spacing={1}
+				p={2}
+				bg={dialogBg}
+				borderWidth="1px"
+				borderColor={dialogBorderColor}
+				borderRadius="md"
+				boxShadow="lg"
+				zIndex={1501}
+			>
+				{ADMIN_TRAFFIC_OPTIONS.map((option) => (
+					<Button
+						key={option.label}
+						variant="ghost"
+						justifyContent="flex-start"
+						onClick={() =>
+							handleAddDataLimit(admin, option.gigabytes, onDone)
+						}
+						isLoading={contextAction === `addData-${option.gigabytes}`}
+						isDisabled={contextAction?.startsWith("addData-")}
+					>
+						{option.label}
+					</Button>
+				))}
+			</Stack>
+		</Box>
+	);
+	const renderAdminActionsMenu = (admin: Admin) => {
+		const meta = getAdminRowMeta(admin);
+		const hasActions =
+			meta.canManage ||
+			meta.showDisable ||
+			meta.showEnable ||
+			meta.showDelete ||
+			meta.showAddTraffic;
+
+		if (!hasActions) {
+			return null;
+		}
+
+		return (
+			<Box onClick={(event) => event.stopPropagation()}>
+				<Menu placement="bottom-start" strategy="fixed" autoSelect={false}>
+					{({ onClose }) => (
+						<>
+							<MenuButton
+								as={IconButton}
+								size="xs"
+								variant="ghost"
+								aria-label={t("admins.actions", "Admin actions")}
+								icon={<MoreIcon />}
+							/>
+							<Portal>
+								<MenuList
+									minW="240px"
+									maxW="calc(100vw - 24px)"
+									maxH="min(70vh, 420px)"
+									overflow="visible"
+								>
+									{meta.canManage && (
+										<MenuItem
+											icon={<PencilIcon width={16} />}
+											onClick={() => openAdminDialog(admin)}
+										>
+											{t("admins.editAction", "Edit")}
+										</MenuItem>
+									)}
+									{meta.canManage && (
+										<MenuItem
+											icon={<AdjustmentsHorizontalIcon width={16} />}
+											onClick={() => handleOpenPermissionsModal(admin)}
+										>
+											{t("admins.editPermissionsButton", "Edit permissions")}
+										</MenuItem>
+									)}
+									{meta.canManage && (
+										<MenuItem
+											icon={<ResetIcon />}
+											onClick={() => runResetUsage(admin)}
+											isDisabled={
+												actionState?.username === admin.username &&
+												actionState?.type === "reset"
+											}
+										>
+											{t("admins.resetUsage", "Reset usage")}
+										</MenuItem>
+									)}
+									{meta.canManage && (admin.deleted_users_usage ?? 0) > 0 && (
+										<MenuItem
+											icon={<QuickPassIcon />}
+											onClick={() => runResetDeletedUsersUsage(admin)}
+											isDisabled={
+												actionState?.username === admin.username &&
+												actionState?.type === "resetDeleted"
+											}
+										>
+											{t(
+												"admins.resetDeletedUsage",
+												"Reset deleted-user usage",
+											)}
+										</MenuItem>
+									)}
+									{meta.showEnable && (
+										<MenuItem
+											icon={<EnableIcon />}
+											onClick={() => handleEnableAdmin(admin)}
+											isDisabled={
+												actionState?.username === admin.username &&
+												actionState?.type === "enableAdmin"
+											}
+										>
+											{t("admins.enableAdmin", "Enable admin")}
+										</MenuItem>
+									)}
+									{meta.showDisable && (
+										<MenuItem
+											icon={<DisableIcon />}
+											onClick={() => startDisableAdmin(admin)}
+											isDisabled={
+												actionState?.username === admin.username &&
+												actionState?.type === "disableAdmin"
+											}
+										>
+											{t("admins.disableAdmin", "Disable admin")}
+										</MenuItem>
+									)}
+									{meta.showAddTraffic &&
+										renderAddTrafficSubmenu(admin, onClose)}
+									{meta.canManage && (
+										<MenuItem
+											icon={<QuickPassIcon />}
+											onClick={() => handleQuickPassword(admin)}
+											isDisabled={contextAction === "quickPassword"}
+										>
+											{t("admins.quickPassword", "Generate new password")}
+										</MenuItem>
+									)}
+									{meta.showDelete && (
+										<MenuItem
+											icon={<DeleteIcon />}
+											color="red.500"
+											onClick={() => startDeleteAdmin(admin)}
+											isDisabled={
+												actionState?.username === admin.username &&
+												actionState?.type === "deleteAdmin"
+											}
+										>
+											{t("delete", "Delete")}
+										</MenuItem>
+									)}
+								</MenuList>
+							</Portal>
+						</>
+					)}
+				</Menu>
+			</Box>
+		);
+	};
+
 	const baseColumns: Array<
-		"username" | "status" | "users_count" | "data" | "actions"
-	> = ["username", "status", "users_count", "data", "actions"];
+		| "username"
+		| "role"
+		| "status"
+		| "expire"
+		| "active"
+		| "online"
+		| "services"
+		| "permissions"
+		| "usage"
+		| "data_limit"
+		| "traffic_mode"
+	> = [
+		"username",
+		"role",
+		"status",
+		"expire",
+		"active",
+		"online",
+		"services",
+		"permissions",
+		"usage",
+		"data_limit",
+		"traffic_mode",
+	];
 	const columnsToRender = isRTL ? baseColumns.slice().reverse() : baseColumns;
 	const cellAlign = isRTL ? "right" : "left";
-	const actionsAlign = isRTL ? "left" : "right";
 	const isFiltered = admins.length !== total;
 	const renderRelativeText = useCallback(
 		(key: "expires" | "expired", time: string) => {
@@ -1049,43 +1408,12 @@ export const AdminsTable: FC<TableProps> = (props) => {
 								? String(admin.users_limit)
 								: "∞";
 						const activeLabel = `${admin.active_users ?? 0}/${usersLimitLabel}`;
-						const effectiveUsage =
-							admin.traffic_limit_mode === AdminTrafficLimitMode.CreatedTraffic
-								? (admin.created_traffic ?? 0)
-								: (admin.users_usage ?? 0);
-						const usageLabel = `${formatBytes(effectiveUsage)} / ${
-							admin.data_limit && admin.data_limit > 0
-								? formatBytes(admin.data_limit)
-								: "∞"
-						}`;
-						const canManageThisAdmin = canManageAdminAccount(admin);
-						const canChangeStatus =
-							canManageThisAdmin && admin.username !== currentAdminUsername;
-						const showDisableAction =
-							canChangeStatus && admin.status !== AdminStatus.Disabled;
-						const hasDataLimitDisabledReason =
-							admin.disabled_reason === ADMIN_DATA_LIMIT_EXHAUSTED_REASON_KEY;
-						const hasTimeLimitDisabledReason =
-							admin.disabled_reason === ADMIN_TIME_LIMIT_EXHAUSTED_REASON_KEY;
-						const disabledReasonLabel = admin.disabled_reason
-							? hasDataLimitDisabledReason
-								? t(
-										"admins.disabledReason.dataLimitExceeded",
-										"Your data limit has been reached",
-									)
-								: hasTimeLimitDisabledReason
-									? t(
-											"admins.disabledReason.timeLimitExceeded",
-											"Your account time limit has expired",
-										)
-								: admin.disabled_reason
-							: null;
-						const showEnableAction =
-							canChangeStatus &&
-							admin.status === AdminStatus.Disabled &&
-							!hasDataLimitDisabledReason &&
-							!hasTimeLimitDisabledReason;
-						const showDeleteAction = canChangeStatus;
+						const adminMeta = getAdminRowMeta(admin);
+						const adminActionsMenu = renderAdminActionsMenu(admin);
+						const servicesLabel = admin.services?.length
+							? formatCount(admin.services.length, locale)
+							: t("admins.allServices", "All services");
+						const permissionsLabel = `${getEnabledUserPermissionsCount(admin)}/${Object.values(UserPermissionToggle).length}`;
 						const adminExpireAt =
 							typeof admin.expire === "number" && admin.expire > 0
 								? admin.expire
@@ -1110,24 +1438,26 @@ export const AdminsTable: FC<TableProps> = (props) => {
 							>
 								<Stack spacing={2}>
 									<HStack justify="space-between" align="center" spacing={3}>
-										<Stack spacing={0} minW={0}>
-											<Text
-												fontWeight="semibold"
-												noOfLines={1}
-												dir="ltr"
-												sx={{ unicodeBidi: "isolate" }}
-											>
-												{admin.username}
-											</Text>
-											<Text
-												fontSize="xs"
-												color="gray.500"
-												_dark={{ color: "gray.400" }}
-												className="rb-usage-pair"
-											>
-												{usageLabel}
-											</Text>
-										</Stack>
+										<HStack spacing={2} minW={0} flex="1" align="flex-start">
+											{adminActionsMenu}
+											<Stack spacing={0} minW={0}>
+												<Text
+													fontWeight="semibold"
+													noOfLines={1}
+													dir="ltr"
+													sx={{ unicodeBidi: "isolate" }}
+												>
+													{admin.username}
+												</Text>
+												<Text
+													fontSize="xs"
+													color="gray.500"
+													_dark={{ color: "gray.400" }}
+												>
+													{t("admins.idLabel", "ایدی")}: {admin.id}
+												</Text>
+											</Stack>
+										</HStack>
 										<Stack
 											spacing={1}
 											align={isRTL ? "flex-end" : "flex-start"}
@@ -1138,25 +1468,46 @@ export const AdminsTable: FC<TableProps> = (props) => {
 									</HStack>
 									<Collapse in={isExpanded} animateOpacity>
 										<Stack spacing={3} pt={1}>
+											<SimpleGrid columns={{ base: 2, sm: 3 }} spacing={2}>
+												<Stack spacing={0}>
+													<Text fontSize="xs" color="gray.500">
+														{t("admins.roleHeader", "Role")}
+													</Text>
+													<AdminRoleBadge role={admin.role} />
+												</Stack>
+												<Stack spacing={0}>
+													<Text fontSize="xs" color="gray.500">
+														{t("admins.servicesHeader", "Services")}
+													</Text>
+													<Text fontSize="sm" fontWeight="semibold">
+														{servicesLabel}
+													</Text>
+												</Stack>
+												<Stack spacing={0}>
+													<Text fontSize="xs" color="gray.500">
+														{t("admins.permissionsHeader", "Permissions")}
+													</Text>
+													<Text fontSize="sm" fontWeight="semibold" dir="ltr">
+														{permissionsLabel}
+													</Text>
+												</Stack>
+											</SimpleGrid>
 											<Stack
 												spacing={0}
 												align={isRTL ? "flex-end" : "flex-start"}
 											>
 												<Text fontSize="sm" fontWeight="semibold">
-													{t("admins.usersManaged", "Managed users")}:{" "}
+													{t("admins.details.activeLabel", "Active")}:{" "}
 													{activeLabel}
 												</Text>
-												{admin.online_users !== null &&
-													admin.online_users !== undefined && (
-														<Text
-															fontSize="xs"
-															color="green.600"
-															_dark={{ color: "green.400" }}
-														>
-															{t("admins.details.onlineLabel", "Online")}:{" "}
-															{admin.online_users}
-														</Text>
-													)}
+												<Text
+													fontSize="xs"
+													color="green.600"
+													_dark={{ color: "green.400" }}
+												>
+													{t("admins.details.onlineLabel", "Online")}:{" "}
+													{admin.online_users ?? 0}
+												</Text>
 											</Stack>
 											<AdminUsageSlider
 												isRTL={isRTL}
@@ -1167,166 +1518,11 @@ export const AdminsTable: FC<TableProps> = (props) => {
 												trafficLimitMode={admin.traffic_limit_mode}
 											/>
 											{admin.status === AdminStatus.Disabled &&
-												disabledReasonLabel && (
+												adminMeta.disabledReasonLabel && (
 													<Text fontSize="xs" color="red.400">
-														{disabledReasonLabel}
+														{adminMeta.disabledReasonLabel}
 													</Text>
 												)}
-											<HStack
-												spacing={2}
-												justify="flex-start"
-												align="center"
-												flexWrap="wrap"
-												onClick={(event) => event.stopPropagation()}
-												dir={isRTL ? "rtl" : "ltr"}
-											>
-												{canManageThisAdmin && (
-													<>
-														<Tooltip label={t("edit")}>
-															<IconButton
-																aria-label={t("edit")}
-																icon={<PencilIcon width={20} />}
-																variant="ghost"
-																size="sm"
-																onClick={(event) => {
-																	event.stopPropagation();
-																	openAdminDialog(admin);
-																}}
-															/>
-														</Tooltip>
-														<Tooltip
-															label={t(
-																"admins.editPermissionsButton",
-																"Edit permissions",
-															)}
-														>
-															<IconButton
-																aria-label={t(
-																	"admins.editPermissionsButton",
-																	"Edit permissions",
-																)}
-																icon={<AdjustmentsHorizontalIcon width={20} />}
-																variant="ghost"
-																size="sm"
-																onClick={(event) => {
-																	event.stopPropagation();
-																	handleOpenPermissionsModal(admin);
-																}}
-															/>
-														</Tooltip>
-														<Tooltip label={t("admins.resetUsage")}>
-															<IconButton
-																aria-label={t("admins.resetUsage")}
-																icon={<ArrowPathIcon width={20} />}
-																variant="ghost"
-																size="sm"
-																isLoading={
-																	actionState?.username === admin.username &&
-																	actionState?.type === "reset"
-																}
-																onClick={(event) => {
-																	event.stopPropagation();
-																	runResetUsage(admin);
-																}}
-															/>
-														</Tooltip>
-														{(admin.deleted_users_usage ?? 0) > 0 && (
-															<Tooltip
-																label={t(
-																	"admins.resetDeletedUsage",
-																	"Reset deleted-user usage",
-																)}
-															>
-																<IconButton
-																	aria-label={t(
-																		"admins.resetDeletedUsage",
-																		"Reset deleted-user usage",
-																	)}
-																	icon={<QuickPassIcon width={20} />}
-																	variant="ghost"
-																	size="sm"
-																	isLoading={
-																		actionState?.username ===
-																			admin.username &&
-																		actionState?.type === "resetDeleted"
-																	}
-																	onClick={(event) => {
-																		event.stopPropagation();
-																		runResetDeletedUsersUsage(admin);
-																	}}
-																/>
-															</Tooltip>
-														)}
-													</>
-												)}
-												{showDisableAction && canManageThisAdmin && (
-													<Tooltip
-														label={t("admins.disableAdmin", "Disable admin")}
-													>
-														<IconButton
-															aria-label={t(
-																"admins.disableAdmin",
-																"Disable admin",
-															)}
-															icon={<NoSymbolIcon width={20} />}
-															variant="ghost"
-															size="sm"
-															isLoading={
-																actionState?.username === admin.username &&
-																actionState?.type === "disableAdmin"
-															}
-															onClick={(event) => {
-																event.stopPropagation();
-																startDisableAdmin(admin);
-															}}
-														/>
-													</Tooltip>
-												)}
-												{showEnableAction && canManageThisAdmin && (
-													<Tooltip
-														label={t("admins.enableAdmin", "Enable admin")}
-													>
-														<IconButton
-															aria-label={t(
-																"admins.enableAdmin",
-																"Enable admin",
-															)}
-															icon={<PlayIcon width={20} />}
-															variant="ghost"
-															size="sm"
-															isLoading={
-																actionState?.username === admin.username &&
-																actionState?.type === "enableAdmin"
-															}
-															onClick={(event) => {
-																event.stopPropagation();
-																handleEnableAdmin(admin);
-															}}
-														/>
-													</Tooltip>
-												)}
-												{showDeleteAction && canManageThisAdmin && (
-													<DeleteConfirmPopover
-														message={t(
-															"admins.confirmDeleteMessage",
-															"Are you sure you want to delete {{username}}?",
-															{ username: admin.username },
-														)}
-														onConfirm={() => handleDeleteAdmin(admin)}
-													>
-														<Tooltip label={t("delete")}>
-															<IconButton
-																aria-label={t("delete")}
-																icon={<TrashIcon width={20} />}
-																variant="ghost"
-																size="sm"
-																colorScheme="red"
-																onClick={(event) => event.stopPropagation()}
-															/>
-														</Tooltip>
-													</DeleteConfirmPopover>
-												)}
-											</HStack>
 										</Stack>
 									</Collapse>
 								</Stack>
@@ -1648,6 +1844,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 											dir={isRTL ? "rtl" : "ltr"}
 											width="100%"
 											w="full"
+											minW="1280px"
 											{...tableProps}
 										>
 											<Thead>
@@ -1657,7 +1854,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 															return (
 																<Th
 																	key="username"
-																	minW="200px"
+																	minW="170px"
 																	cursor="pointer"
 																	onClick={() => handleSort("username")}
 																	textAlign={cellAlign}
@@ -1680,18 +1877,40 @@ export const AdminsTable: FC<TableProps> = (props) => {
 															return (
 																<Th
 																	key="status"
-																	minW="140px"
+																	minW="110px"
 																	textAlign={cellAlign}
 																>
 																	<Text>{t("status")}</Text>
 																</Th>
 															);
 														}
-														if (col === "users_count") {
+														if (col === "role") {
 															return (
 																<Th
-																	key="users_count"
+																	key="role"
 																	minW="130px"
+																	textAlign={cellAlign}
+																>
+																	<Text>{t("admins.roleHeader", "Role")}</Text>
+																</Th>
+															);
+														}
+														if (col === "expire") {
+															return (
+																<Th
+																	key="expire"
+																	minW="125px"
+																	textAlign={cellAlign}
+																>
+																	<Text>{t("expire", "Expire")}</Text>
+																</Th>
+															);
+														}
+														if (col === "active") {
+															return (
+																<Th
+																	key="active"
+																	minW="105px"
 																	cursor="pointer"
 																	onClick={() => handleSort("users_count")}
 																	textAlign={cellAlign}
@@ -1706,8 +1925,8 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																	>
 																		<Text>
 																			{t(
-																				"admins.usersManaged",
-																				"Managed users",
+																				"admins.details.activeLabel",
+																				"Active",
 																			)}
 																		</Text>
 																		<SortIndicator column="users_count" />
@@ -1715,56 +1934,101 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																</Th>
 															);
 														}
-														if (col === "data") {
+														if (col === "online") {
 															return (
 																<Th
-																	key="data"
-																	minW="240px"
+																	key="online"
+																	minW="90px"
+																	textAlign={cellAlign}
+																>
+																	<Text>
+																		{t("admins.details.onlineLabel", "Online")}
+																	</Text>
+																</Th>
+															);
+														}
+														if (col === "services") {
+															return (
+																<Th
+																	key="services"
+																	minW="110px"
+																	textAlign={cellAlign}
+																>
+																	<Text>
+																		{t("admins.servicesHeader", "Services")}
+																	</Text>
+																</Th>
+															);
+														}
+														if (col === "permissions") {
+															return (
+																<Th
+																	key="permissions"
+																	minW="110px"
+																	textAlign={cellAlign}
+																>
+																	<Text>
+																		{t(
+																			"admins.permissionsHeader",
+																			"Permissions",
+																		)}
+																	</Text>
+																</Th>
+															);
+														}
+														if (col === "usage") {
+															return (
+																<Th
+																	key="usage"
+																	minW="120px"
+																	cursor="pointer"
+																	onClick={() => handleSort("data_usage")}
 																	textAlign={cellAlign}
 																>
 																	<HStack spacing={2} align="center">
 																		<Text>
-																			{t(
-																				"admins.dataUsageHeader",
-																				"Usage / Limit",
-																			)}
+																			{t("admins.details.used", "Used")}
 																		</Text>
-																		<Menu>
-																			<MenuButton
-																				as={IconButton}
-																				size="xs"
-																				variant="ghost"
-																				icon={<SortIndicator column="data" />}
-																			/>
-																			<MenuList>
-																				<MenuItem
-																					onClick={() =>
-																						handleSort("data_usage")
-																					}
-																				>
-																					{t("admins.sortByUsage")}
-																				</MenuItem>
-																				<MenuItem
-																					onClick={() =>
-																						handleSort("data_limit")
-																					}
-																				>
-																					{t("admins.sortByLimit")}
-																				</MenuItem>
-																			</MenuList>
-																		</Menu>
+																		<SortIndicator column="data_usage" />
 																	</HStack>
 																</Th>
 															);
 														}
-														return (
-															<Th
-																key="actions"
-																minW="150px"
-																width="180px"
-																textAlign={actionsAlign}
-															/>
-														);
+														if (col === "data_limit") {
+															return (
+																<Th
+																	key="data_limit"
+																	minW="120px"
+																	cursor="pointer"
+																	onClick={() => handleSort("data_limit")}
+																	textAlign={cellAlign}
+																>
+																	<HStack spacing={2} align="center">
+																		<Text>
+																			{t("admins.details.limit", "Limit")}
+																		</Text>
+																		<SortIndicator column="data_limit" />
+																	</HStack>
+																</Th>
+															);
+														}
+														if (col === "traffic_mode") {
+															return (
+																<Th
+																	key="traffic_mode"
+																	minW="125px"
+																	textAlign={cellAlign}
+																>
+																	<Text>
+																		{t(
+																			"admins.details.trafficMode",
+																			"Traffic mode",
+																		)}
+																	</Text>
+																</Th>
+															);
+														}
+														return null;
 													})}
 												</Tr>
 											</Thead>
@@ -1777,27 +2041,54 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																		<Skeleton height="16px" width="60%" />
 																	</Td>
 																),
+																role: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="16px" width="90px" />
+																	</Td>
+																),
 																status: (
 																	<Td textAlign={cellAlign}>
 																		<Skeleton height="16px" width="80px" />
 																	</Td>
 																),
-																users_count: (
+																expire: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="90px" />
+																	</Td>
+																),
+																active: (
 																	<Td textAlign={cellAlign}>
 																		<Skeleton height="14px" width="70px" />
 																	</Td>
 																),
-																data: (
+																online: (
 																	<Td textAlign={cellAlign}>
-																		<Skeleton height="16px" width="120px" />
+																		<Skeleton height="14px" width="48px" />
 																	</Td>
 																),
-																actions: (
-																	<Td textAlign={actionsAlign}>
-																		<HStack spacing={2} justify="flex-start">
-																			<Skeleton height="16px" width="32px" />
-																			<Skeleton height="16px" width="32px" />
-																		</HStack>
+																services: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="70px" />
+																	</Td>
+																),
+																permissions: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="50px" />
+																	</Td>
+																),
+																usage: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="80px" />
+																	</Td>
+																),
+																data_limit: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="80px" />
+																	</Td>
+																),
+																traffic_mode: (
+																	<Td textAlign={cellAlign}>
+																		<Skeleton height="14px" width="90px" />
 																	</Td>
 																),
 															} as const;
@@ -1819,39 +2110,26 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																	? String(admin.users_limit)
 																	: "∞";
 															const activeLabel = `${admin.active_users ?? 0}/${usersLimitLabel}`;
-															const canManageThisAdmin =
-																canManageAdminAccount(admin);
-															const canChangeStatus =
-																canManageThisAdmin &&
-																admin.username !== currentAdminUsername;
-															const showDisableAction =
-																canChangeStatus &&
-																admin.status !== AdminStatus.Disabled;
-															const hasDataLimitDisabledReason =
-																admin.disabled_reason ===
-																ADMIN_DATA_LIMIT_EXHAUSTED_REASON_KEY;
-															const hasTimeLimitDisabledReason =
-																admin.disabled_reason ===
-																ADMIN_TIME_LIMIT_EXHAUSTED_REASON_KEY;
-															const disabledReasonLabel = admin.disabled_reason
-																? hasDataLimitDisabledReason
+															const adminMeta = getAdminRowMeta(admin);
+															const adminActionsMenu =
+																renderAdminActionsMenu(admin);
+															const servicesLabel = admin.services?.length
+																? formatCount(admin.services.length, locale)
+																: t("admins.allServices", "All services");
+															const permissionsLabel = `${getEnabledUserPermissionsCount(admin)}/${Object.values(UserPermissionToggle).length}`;
+															const effectiveUsage =
+																admin.traffic_limit_mode ===
+																AdminTrafficLimitMode.CreatedTraffic
+																	? (admin.created_traffic ?? 0)
+																	: (admin.users_usage ?? 0);
+															const trafficModeLabel =
+																admin.traffic_limit_mode ===
+																AdminTrafficLimitMode.CreatedTraffic
 																	? t(
-																			"admins.disabledReason.dataLimitExceeded",
-																			"Your data limit has been reached",
+																			"admins.createdTrafficMode",
+																			"Created traffic",
 																		)
-																	: hasTimeLimitDisabledReason
-																		? t(
-																				"admins.disabledReason.timeLimitExceeded",
-																				"Your account time limit has expired",
-																			)
-																	: admin.disabled_reason
-																: null;
-															const showEnableAction =
-																canChangeStatus &&
-																admin.status === AdminStatus.Disabled &&
-																!hasDataLimitDisabledReason &&
-																!hasTimeLimitDisabledReason;
-															const showDeleteAction = canChangeStatus;
+																	: t("admins.usedTrafficMode", "Used traffic");
 															const adminExpireAt =
 																typeof admin.expire === "number" &&
 																admin.expire > 0
@@ -1861,16 +2139,18 @@ export const AdminsTable: FC<TableProps> = (props) => {
 															const cells = {
 																username: (
 																	<Td textAlign={cellAlign}>
-																		<Stack
-																			spacing={1}
-																			align={isRTL ? "flex-end" : "flex-start"}
+																		<HStack
+																			spacing={2}
+																			align="flex-start"
+																			justify="flex-start"
+																			dir={isRTL ? "rtl" : "ltr"}
 																		>
-																			<HStack
-																				spacing={2}
-																				align="center"
-																				justify="flex-start"
-																				flexDirection={
-																					isRTL ? "row-reverse" : "row"
+																			{adminActionsMenu}
+																			<Stack
+																				spacing={0}
+																				minW={0}
+																				align={
+																					isRTL ? "flex-end" : "flex-start"
 																				}
 																			>
 																				<Text
@@ -1881,339 +2161,115 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																				>
 																					{admin.username}
 																				</Text>
-																				<Tooltip
-																					label={
-																						admin.role === AdminRole.FullAccess
-																							? t(
-																									"admins.roles.fullAccess",
-																									"Full access",
-																								)
-																							: admin.role === AdminRole.Sudo
-																								? t("admins.roles.sudo", "Sudo")
-																								: t(
-																										"admins.roles.standard",
-																										"Standard",
-																									)
-																					}
-																					placement="top"
+																				<Text
+																					fontSize="xs"
+																					color="gray.500"
+																					_dark={{ color: "gray.400" }}
 																				>
-																					<Text
-																						fontSize="xs"
-																						px={2}
-																						py={0.5}
-																						borderRadius="full"
-																						bg={
-																							admin.role ===
-																							AdminRole.FullAccess
-																								? "yellow.100"
-																								: admin.role === AdminRole.Sudo
-																									? "purple.100"
-																									: "gray.100"
-																						}
-																						color={
-																							admin.role ===
-																							AdminRole.FullAccess
-																								? "yellow.800"
-																								: admin.role === AdminRole.Sudo
-																									? "purple.800"
-																									: "gray.800"
-																						}
-																						_dark={{
-																							bg:
-																								admin.role ===
-																								AdminRole.FullAccess
-																									? "yellow.900"
-																									: admin.role ===
-																											AdminRole.Sudo
-																										? "purple.900"
-																										: "gray.700",
-																							color:
-																								admin.role ===
-																								AdminRole.FullAccess
-																									? "yellow.200"
-																									: admin.role ===
-																											AdminRole.Sudo
-																										? "purple.200"
-																										: "gray.200",
-																						}}
-																					>
-																						{admin.role}
-																					</Text>
-																				</Tooltip>
-																			</HStack>
-																			<Text
-																				fontSize="xs"
-																				color="gray.500"
-																				_dark={{ color: "gray.400" }}
-																			>
-																				{t("admins.idLabel", "ایدی")}:{" "}
-																				{admin.id}
-																			</Text>
-																		</Stack>
+																					{t("admins.idLabel", "ایدی")}:{" "}
+																					{admin.id}
+																				</Text>
+																			</Stack>
+																		</HStack>
+																	</Td>
+																),
+																role: (
+																	<Td textAlign={cellAlign}>
+																		<AdminRoleBadge role={admin.role} />
 																	</Td>
 																),
 																status: (
 																	<Td textAlign={cellAlign}>
-																		<Stack
-																			spacing={1}
-																			align={isRTL ? "flex-end" : "flex-start"}
-																			maxW="full"
+																		<AdminStatusBadge status={admin.status} />
+																	</Td>
+																),
+																expire: (
+																	<Td textAlign={cellAlign}>
+																		<Box
+																			maxW="120px"
+																			whiteSpace="nowrap"
+																			overflow="hidden"
+																			textOverflow="ellipsis"
 																		>
-																			<AdminStatusBadge status={admin.status} />
 																			{renderAdminExpire(adminExpireAt)}
-																			{admin.status === AdminStatus.Disabled &&
-																				disabledReasonLabel && (
-																					<Text
-																						fontSize="xs"
-																						color="red.400"
-																						mt={1}
-																					>
-																						{disabledReasonLabel}
-																					</Text>
-																				)}
-																		</Stack>
+																		</Box>
 																	</Td>
 																),
-																users_count: (
+																active: (
 																	<Td textAlign={cellAlign}>
-																		<Stack
-																			spacing={0}
-																			align={isRTL ? "flex-end" : "flex-start"}
+																		<Text
+																			fontSize="sm"
+																			fontWeight="semibold"
+																			dir="ltr"
+																			sx={{ unicodeBidi: "isolate" }}
 																		>
-																			<Text fontSize="sm" fontWeight="semibold">
-																				{activeLabel}
-																			</Text>
-																			{admin.online_users !== null &&
-																				admin.online_users !== undefined && (
-																					<Text
-																						fontSize="xs"
-																						color="green.600"
-																						_dark={{ color: "green.400" }}
-																						mt={1}
-																					>
-																						{t(
-																							"admins.details.onlineLabel",
-																							"Online",
-																						)}
-																						: {admin.online_users}
-																					</Text>
-																				)}
-																		</Stack>
+																			{activeLabel}
+																		</Text>
 																	</Td>
 																),
-																data: (
+																online: (
 																	<Td textAlign={cellAlign}>
-																		<AdminUsageSlider
-																			isRTL={isRTL}
-																			used={admin.users_usage ?? 0}
-																			createdTraffic={admin.created_traffic ?? 0}
-																			total={admin.data_limit ?? null}
-																			lifetimeUsage={
-																				admin.lifetime_usage ?? null
-																			}
-																			trafficLimitMode={admin.traffic_limit_mode}
-																		/>
-																	</Td>
-																),
-																actions: (
-																	<Td textAlign={actionsAlign}>
-																		<HStack
-																			spacing={2}
-																			justify="flex-start"
-																			align="center"
-																			flexWrap="wrap"
-																			onClick={(event) =>
-																				event.stopPropagation()
-																			}
-																			dir={isRTL ? "rtl" : "ltr"}
+																		<Text
+																			fontSize="sm"
+																			color="green.600"
+																			_dark={{ color: "green.400" }}
+																			fontWeight="semibold"
 																		>
-																			{canManageThisAdmin && (
-																				<>
-																					<Tooltip label={t("edit")}>
-																						<IconButton
-																							aria-label={t("edit")}
-																							icon={<PencilIcon width={20} />}
-																							variant="ghost"
-																							size="sm"
-																							onClick={(event) => {
-																								event.stopPropagation();
-																								openAdminDialog(admin);
-																							}}
-																						/>
-																					</Tooltip>
-																					<Tooltip
-																						label={t(
-																							"admins.editPermissionsButton",
-																							"Edit permissions",
-																						)}
-																					>
-																						<IconButton
-																							aria-label={t(
-																								"admins.editPermissionsButton",
-																								"Edit permissions",
-																							)}
-																							icon={
-																								<AdjustmentsHorizontalIcon
-																									width={20}
-																								/>
-																							}
-																							variant="ghost"
-																							size="sm"
-																							onClick={(event) => {
-																								event.stopPropagation();
-																								handleOpenPermissionsModal(
-																									admin,
-																								);
-																							}}
-																						/>
-																					</Tooltip>
-																					<Tooltip
-																						label={t("admins.resetUsage")}
-																					>
-																						<IconButton
-																							aria-label={t(
-																								"admins.resetUsage",
-																							)}
-																							icon={
-																								<ArrowPathIcon width={20} />
-																							}
-																							variant="ghost"
-																							size="sm"
-																							isLoading={
-																								actionState?.username ===
-																									admin.username &&
-																								actionState?.type === "reset"
-																							}
-																							onClick={(event) => {
-																								event.stopPropagation();
-																								runResetUsage(admin);
-																							}}
-																						/>
-																					</Tooltip>
-																					{(admin.deleted_users_usage ?? 0) >
-																						0 && (
-																						<Tooltip
-																							label={t(
-																								"admins.resetDeletedUsage",
-																								"Reset deleted-user usage",
-																							)}
-																						>
-																							<IconButton
-																								aria-label={t(
-																									"admins.resetDeletedUsage",
-																									"Reset deleted-user usage",
-																								)}
-																								icon={
-																									<QuickPassIcon width={20} />
-																								}
-																								variant="ghost"
-																								size="sm"
-																								isLoading={
-																									actionState?.username ===
-																										admin.username &&
-																									actionState?.type ===
-																										"resetDeleted"
-																								}
-																								onClick={(event) => {
-																									event.stopPropagation();
-																									runResetDeletedUsersUsage(
-																										admin,
-																									);
-																								}}
-																							/>
-																						</Tooltip>
-																					)}
-																				</>
+																			{formatCount(
+																				admin.online_users ?? 0,
+																				locale,
 																			)}
-																			{showDisableAction &&
-																				canManageThisAdmin && (
-																					<Tooltip
-																						label={t(
-																							"admins.disableAdmin",
-																							"Disable admin",
-																						)}
-																					>
-																						<IconButton
-																							aria-label={t(
-																								"admins.disableAdmin",
-																								"Disable admin",
-																							)}
-																							icon={<NoSymbolIcon width={20} />}
-																							variant="ghost"
-																							size="sm"
-																							isLoading={
-																								actionState?.username ===
-																									admin.username &&
-																								actionState?.type ===
-																									"disableAdmin"
-																							}
-																							onClick={(event) => {
-																								event.stopPropagation();
-																								startDisableAdmin(admin);
-																							}}
-																						/>
-																					</Tooltip>
-																				)}
-																			{showEnableAction &&
-																				canManageThisAdmin && (
-																					<Tooltip
-																						label={t(
-																							"admins.enableAdmin",
-																							"Enable admin",
-																						)}
-																					>
-																						<IconButton
-																							aria-label={t(
-																								"admins.enableAdmin",
-																								"Enable admin",
-																							)}
-																							icon={<PlayIcon width={20} />}
-																							variant="ghost"
-																							size="sm"
-																							isLoading={
-																								actionState?.username ===
-																									admin.username &&
-																								actionState?.type ===
-																									"enableAdmin"
-																							}
-																							onClick={(event) => {
-																								event.stopPropagation();
-																								handleEnableAdmin(admin);
-																							}}
-																						/>
-																					</Tooltip>
-																				)}
-																			{showDeleteAction &&
-																				canManageThisAdmin && (
-																					<DeleteConfirmPopover
-																						message={t(
-																							"admins.confirmDeleteMessage",
-																							"Are you sure you want to delete {{username}}?",
-																							{
-																								username: admin.username,
-																							},
-																						)}
-																						onConfirm={() =>
-																							handleDeleteAdmin(admin)
-																						}
-																					>
-																						<Tooltip label={t("delete")}>
-																							<IconButton
-																								aria-label={t("delete")}
-																								icon={
-																									<TrashIcon width={20} />
-																								}
-																								variant="ghost"
-																								size="sm"
-																								colorScheme="red"
-																								onClick={(event) =>
-																									event.stopPropagation()
-																								}
-																							/>
-																						</Tooltip>
-																					</DeleteConfirmPopover>
-																				)}
-																		</HStack>
+																		</Text>
+																	</Td>
+																),
+																services: (
+																	<Td textAlign={cellAlign}>
+																		<Text fontSize="sm" noOfLines={1}>
+																			{servicesLabel}
+																		</Text>
+																	</Td>
+																),
+																permissions: (
+																	<Td textAlign={cellAlign}>
+																		<Text
+																			fontSize="sm"
+																			fontWeight="semibold"
+																			dir="ltr"
+																			sx={{ unicodeBidi: "isolate" }}
+																		>
+																			{permissionsLabel}
+																		</Text>
+																	</Td>
+																),
+																usage: (
+																	<Td textAlign={cellAlign}>
+																		<Text
+																			fontSize="sm"
+																			dir="ltr"
+																			sx={{ unicodeBidi: "isolate" }}
+																			whiteSpace="nowrap"
+																		>
+																			{formatBytes(effectiveUsage, 2)}
+																		</Text>
+																	</Td>
+																),
+																data_limit: (
+																	<Td textAlign={cellAlign}>
+																		<Text
+																			fontSize="sm"
+																			dir="ltr"
+																			sx={{ unicodeBidi: "isolate" }}
+																			whiteSpace="nowrap"
+																		>
+																			{formatByteLimit(admin.data_limit)}
+																		</Text>
+																	</Td>
+																),
+																traffic_mode: (
+																	<Td textAlign={cellAlign}>
+																		<Text fontSize="sm" noOfLines={1}>
+																			{trafficModeLabel}
+																		</Text>
 																	</Td>
 																),
 															} as const;
@@ -2231,7 +2287,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 																		handleRowContextMenu(
 																			event,
 																			admin,
-																			canManageThisAdmin,
+																			adminMeta.canManage,
 																		)
 																	}
 																	cursor="pointer"
@@ -2270,19 +2326,12 @@ export const AdminsTable: FC<TableProps> = (props) => {
 				contextMenu.admin &&
 				(() => {
 					const ctxAdmin = contextMenu.admin;
-					const canManage = canManageAdminAccount(ctxAdmin);
-					const canChangeStatus =
-						canManage && ctxAdmin.username !== currentAdminUsername;
-					const showDisable =
-						canChangeStatus && ctxAdmin.status !== AdminStatus.Disabled;
-					const showEnable =
-						canChangeStatus && ctxAdmin.status === AdminStatus.Disabled;
-					const showDelete = canChangeStatus;
-					const showAddTraffic =
-						canManage &&
-						ctxAdmin.data_limit !== null &&
-						ctxAdmin.data_limit !== 0 &&
-						ctxAdmin.data_limit !== undefined;
+					const ctxMeta = getAdminRowMeta(ctxAdmin);
+					const canManage = ctxMeta.canManage;
+					const showDisable = ctxMeta.showDisable;
+					const showEnable = ctxMeta.showEnable;
+					const showDelete = ctxMeta.showDelete;
+					const showAddTraffic = ctxMeta.showAddTraffic;
 					return (
 						<Box
 							position="fixed"
@@ -2295,6 +2344,9 @@ export const AdminsTable: FC<TableProps> = (props) => {
 							boxShadow="lg"
 							zIndex={1500}
 							minW="220px"
+							maxW="calc(100vw - 24px)"
+							maxH="min(70vh, 420px)"
+							overflow="visible"
 							onClick={(e) => e.stopPropagation()}
 							onContextMenu={(e) => {
 								e.preventDefault();
@@ -2358,15 +2410,7 @@ export const AdminsTable: FC<TableProps> = (props) => {
 									</Button>
 								)}
 								{showAddTraffic && (
-									<Button
-										variant="ghost"
-										justifyContent="flex-start"
-										leftIcon={<AddDataIcon />}
-										onClick={() => handleAddDataLimit(ctxAdmin, 500)}
-										isLoading={contextAction === "addData"}
-									>
-										{t("admins.add500Gb", "Add 500 GB")}
-									</Button>
+									renderAddTrafficSubmenu(ctxAdmin)
 								)}
 								{canManage && (
 									<Button
@@ -2380,31 +2424,67 @@ export const AdminsTable: FC<TableProps> = (props) => {
 									</Button>
 								)}
 								{showDelete && (
-									<DeleteConfirmPopover
-										message={t(
-											"admins.confirmDeleteMessage",
-											"Are you sure you want to delete {{username}}?",
-											{ username: ctxAdmin.username },
-										)}
-										onConfirm={async () => {
-											await handleDeleteAdmin(ctxAdmin);
-											closeContextMenu();
-										}}
+									<Button
+										variant="ghost"
+										justifyContent="flex-start"
+										colorScheme="red"
+										leftIcon={<DeleteIcon />}
+										onClick={() => startDeleteAdmin(ctxAdmin)}
+										isLoading={
+											actionState?.type === "deleteAdmin" &&
+											actionState?.username === ctxAdmin.username
+										}
 									>
-										<Button
-											variant="ghost"
-											justifyContent="flex-start"
-											colorScheme="red"
-											leftIcon={<DeleteIcon />}
-										>
-											{t("delete", "Delete")}
-										</Button>
-									</DeleteConfirmPopover>
+										{t("delete", "Delete")}
+									</Button>
 								)}
 							</Stack>
 						</Box>
 					);
 				})()}
+
+			<AlertDialog
+				isOpen={isDeleteDialogOpen}
+				leastDestructiveRef={deleteCancelRef}
+				onClose={closeDeleteDialogAndReset}
+			>
+				<AlertDialogOverlay bg="blackAlpha.300" backdropFilter="blur(10px)">
+					<AlertDialogContent
+						bg={dialogBg}
+						borderWidth="1px"
+						borderColor={dialogBorderColor}
+					>
+						<AlertDialogHeader fontSize="lg" fontWeight="bold">
+							{t("delete", "Delete")}
+						</AlertDialogHeader>
+						<AlertDialogBody>
+							{t(
+								"admins.confirmDeleteMessage",
+								"Are you sure you want to delete {{username}}?",
+								{ username: adminToDelete?.username ?? "" },
+							)}
+						</AlertDialogBody>
+						<AlertDialogFooter>
+							<Button
+								ref={deleteCancelRef}
+								onClick={closeDeleteDialogAndReset}
+								isDisabled={actionState?.type === "deleteAdmin"}
+							>
+								{t("cancel", "Cancel")}
+							</Button>
+							<Button
+								colorScheme="red"
+								onClick={confirmDeleteAdmin}
+								ml={3}
+								isLoading={actionState?.type === "deleteAdmin"}
+								isDisabled={!adminToDelete}
+							>
+								{t("delete", "Delete")}
+							</Button>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialogOverlay>
+			</AlertDialog>
 
 			<Modal isOpen={isQuickPassOpen} onClose={handleCloseQuickPass} isCentered>
 				<ModalOverlay />

@@ -13,13 +13,14 @@ import {
 	PopoverTrigger,
 	Portal,
 	Text,
+	useBreakpointValue,
 	useColorModeValue,
 	useDisclosure,
-	VStack,
 } from "@chakra-ui/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import dayjs from "dayjs";
 import { type FC, useEffect, useState } from "react";
+import { NumericInput } from "./common/NumericInput";
 
 interface DateTimePickerProps {
 	value?: Date | null;
@@ -42,6 +43,7 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 	quickSelects: _quickSelects = [],
 }) => {
 	const { isOpen, onOpen, onClose } = useDisclosure();
+	const isMobile = useBreakpointValue({ base: true, md: false }) ?? false;
 	const [displayMonth, setDisplayMonth] = useState(() =>
 		value ? dayjs(value) : dayjs(),
 	);
@@ -154,8 +156,8 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 						size="xs"
 						variant="ghost"
 						w="full"
-						h="28px"
-						minW="28px"
+						h={{ base: "34px", md: "28px" }}
+						minW={{ base: "34px", md: "28px" }}
 						fontSize="xs"
 						fontWeight={isToday ? "bold" : "normal"}
 						bg={isSelected ? "primary.500" : "transparent"}
@@ -189,8 +191,18 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 			isOpen={isOpen}
 			onOpen={onOpen}
 			onClose={handleClose}
-			placement="bottom-start"
+			placement={isMobile ? "bottom" : "bottom-start"}
 			isLazy
+			strategy="fixed"
+			modifiers={[
+				{ name: "preventOverflow", options: { padding: 8 } },
+				{
+					name: "flip",
+					options: {
+						fallbackPlacements: ["top", "bottom-start", "top-start"],
+					},
+				},
+			]}
 		>
 			<PopoverTrigger>
 				<Input
@@ -207,35 +219,47 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 			</PopoverTrigger>
 			<Portal>
 				<PopoverContent
-					w="auto"
-					maxW="min(90vw, 420px)"
+					w={{
+						base: "calc(100vw - 16px)",
+						sm: "min(420px, calc(100vw - 16px))",
+						md: "auto",
+					}}
+					maxW="calc(100vw - 16px)"
+					maxH={{ base: "min(82svh, 640px)", md: "calc(100vh - 24px)" }}
+					overflow="hidden"
 					bg={popoverBg}
 					borderColor={popoverBorderColor}
 					color={popoverText}
+					zIndex={17002}
 					_focus={{ boxShadow: "none" }}
 				>
-					<PopoverBody p={0}>
-						<Flex>
+					<PopoverBody p={0} maxH="inherit" overflowY="auto">
+						<Flex direction={{ base: "column", md: "row" }}>
 							{/* Quick Select Sidebar */}
-							<VStack
-								spacing={1}
+							<Flex
+								gap={1}
 								align="stretch"
 								px={2}
 								py={2}
 								bg={quickSelectBg}
-								minW="100px"
-								maxW="110px"
-								borderRight="1px solid"
+								minW={{ base: "0", md: "100px" }}
+								maxW={{ base: "100%", md: "110px" }}
+								borderRight={{ base: "0", md: "1px solid" }}
+								borderBottom={{ base: "1px solid", md: "0" }}
 								borderColor={quickSelectBorderColor}
 								flexShrink={0}
+								flexDirection={{ base: "row", md: "column" }}
+								flexWrap={{ base: "wrap", md: "nowrap" }}
 							>
 								{/* Built-in Quick Selects */}
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(1)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
@@ -243,10 +267,12 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 								</Button>
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(30)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
@@ -254,10 +280,12 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 								</Button>
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(90)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
@@ -265,10 +293,12 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 								</Button>
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(180)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
@@ -276,10 +306,12 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 								</Button>
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(365)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
@@ -287,19 +319,21 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 								</Button>
 								<Button
 									variant="ghost"
-									justifyContent="flex-start"
+									justifyContent={{ base: "center", md: "flex-start" }}
 									size="sm"
 									fontSize="xs"
 									whiteSpace="nowrap"
+									flex={{ base: "1 1 calc(33.333% - 4px)", md: "0 0 auto" }}
+									minW={{ base: "82px", md: "auto" }}
 									onClick={() => handleQuickSelect(1095)}
 									_hover={{ bg: quickSelectHoverBg }}
 								>
 									+3 Years
 								</Button>
-							</VStack>
+							</Flex>
 
 							{/* Calendar */}
-							<Box flex="1" p={2}>
+							<Box flex="1" p={{ base: 2, md: 2 }} minW={0}>
 								{/* Month Navigation */}
 								<Flex justify="space-between" align="center" mb={2}>
 									<HStack spacing={1}>
@@ -357,40 +391,36 @@ export const DateTimePicker: FC<DateTimePickerProps> = ({
 									<Text fontSize="2xs" color={timeLabelColor}>
 										Time:
 									</Text>
-									<Input
-										type="number"
+									<NumericInput
 										size="xs"
 										w="45px"
 										min={0}
 										max={23}
 										value={selectedTime.hour}
-										onChange={(e) => {
+										onChange={(value) => {
 											const h = Math.max(
 												0,
-												Math.min(23, parseInt(e.target.value, 10) || 0),
+												Math.min(23, parseInt(value, 10) || 0),
 											);
 											handleTimeChange(h, selectedTime.minute);
 										}}
-										textAlign="center"
-										fontSize="xs"
+										fieldProps={{ textAlign: "center", fontSize: "xs" }}
 									/>
 									<Text fontSize="xs">:</Text>
-									<Input
-										type="number"
+									<NumericInput
 										size="xs"
 										w="45px"
 										min={0}
 										max={59}
 										value={selectedTime.minute}
-										onChange={(e) => {
+										onChange={(value) => {
 											const m = Math.max(
 												0,
-												Math.min(59, parseInt(e.target.value, 10) || 0),
+												Math.min(59, parseInt(value, 10) || 0),
 											);
 											handleTimeChange(selectedTime.hour, m);
 										}}
-										textAlign="center"
-										fontSize="xs"
+										fieldProps={{ textAlign: "center", fontSize: "xs" }}
 									/>
 								</HStack>
 

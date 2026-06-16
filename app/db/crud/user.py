@@ -50,6 +50,7 @@ from app.models.user import (
 from app.utils.jwt import get_subscription_payload
 from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from config import (
+    ONLINE_ACTIVE_WINDOW_SECONDS,
     USERS_AUTODELETE_DAYS,
     XRAY_SUBSCRIPTION_PATH,
 )
@@ -176,7 +177,7 @@ UsersSortingOptions = Enum(
     },
 )
 
-ONLINE_ACTIVE_WINDOW = timedelta(minutes=5)
+ONLINE_ACTIVE_WINDOW = timedelta(seconds=max(1, ONLINE_ACTIVE_WINDOW_SECONDS))
 OFFLINE_STALE_WINDOW = timedelta(hours=24)
 UPDATE_STALE_WINDOW = timedelta(hours=24)
 _HEX_DIGITS = frozenset("0123456789abcdef")
@@ -1413,9 +1414,9 @@ def update_user(
                 dbuser.proxies.append(new_proxy)
                 added_proxies.update({proxy_type: new_proxy})
         existing_types = {pt.value for pt in modify_proxy_types}
-        for proxy in dbuser.proxies:
+        for proxy in list(dbuser.proxies):
             if proxy.type not in modify.proxies and proxy.type not in existing_types:
-                db.delete(proxy)
+                dbuser.proxies.remove(proxy)
     if modify.inbounds:
         for proxy_type, tags in modify.excluded_inbounds.items():
             dbproxy = db.query(Proxy).where(
@@ -1429,6 +1430,7 @@ def update_user(
 
     if modify.status is not None:
         dbuser.status = modify.status
+        dbuser.admin_disabled_at = None
     if "data_limit" in modify.model_fields_set:
         next_data_limit = modify.data_limit or None
         data_limit_delta = validate_created_traffic_data_limit_change(
@@ -1956,7 +1958,11 @@ def disable_all_active_users(db: Session, admin: Optional[Admin] = None):
     if admin:
         query = query.filter(User.admin == admin)
     query.update(
-        {User.status: UserStatus.disabled, User.last_status_change: datetime.now(timezone.utc)},
+        {
+            User.status: UserStatus.disabled,
+            User.last_status_change: datetime.now(timezone.utc),
+            User.admin_disabled_at: None,
+        },
         synchronize_session=False,
     )
     db.commit()
@@ -2000,6 +2006,7 @@ def activate_all_disabled_users(db: Session, admin: Optional[Admin] = None):
         if dbuser.status != target_status:
             dbuser.status = target_status
             dbuser.last_status_change = now
+            dbuser.admin_disabled_at = None
 
     db.commit()
 
@@ -2038,6 +2045,7 @@ def bulk_update_user_status(
         {
             User.status: target_status,
             User.last_status_change: now,
+            User.admin_disabled_at: None,
         },
         synchronize_session=False,
     )
@@ -2079,6 +2087,7 @@ def autodelete_expired_users(db: Session, include_limited_users: bool = False) -
 def update_user_status(db: Session, dbuser: User, status: UserStatus) -> User:
     """Updates a user's status and records the time of change."""
     dbuser.status, dbuser.last_status_change = status, datetime.now(timezone.utc)
+    dbuser.admin_disabled_at = None
     db.commit()
     db.refresh(dbuser)
     return dbuser

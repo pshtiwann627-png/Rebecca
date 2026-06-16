@@ -18,6 +18,7 @@ from app.subscription.share import encode_title, generate_subscription, is_crede
 from app.services.subscription_settings import SubscriptionSettingsService
 from app.templates import render_template
 from app.utils.proxy_uuid import ensure_user_proxy_uuids
+from config import SUBSCRIPTION_READ_ONLY
 
 client_config = {
     "clash-meta": {
@@ -70,6 +71,12 @@ def _resolve_support_url(settings) -> str:
     return support_url
 
 
+def _update_subscription_access_if_enabled(db: Session, dbuser: UserResponse, user_agent: str) -> None:
+    if SUBSCRIPTION_READ_ONLY:
+        return
+    crud.update_user_sub(db, dbuser, user_agent)
+
+
 def get_subscription_user_info(user: UserResponse) -> dict:
     """Retrieve user subscription information including upload, download, total data, and expiry."""
     used_traffic = int(getattr(user, "used_traffic", 0) or 0)
@@ -118,7 +125,7 @@ def _serve_subscription_response(
             )
         )
 
-    crud.update_user_sub(db, dbuser, user_agent)
+    _update_subscription_access_if_enabled(db, dbuser, user_agent)
     support_url = _resolve_support_url(settings)
     response_headers = {
         "content-disposition": f'attachment; filename="{user.username}"',

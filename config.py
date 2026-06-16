@@ -48,7 +48,7 @@ def _load_environment_file() -> Path | None:
         seen_paths.add(normalized)
 
         if resolved_candidate.is_file():
-            load_dotenv(dotenv_path=resolved_candidate, override=False)
+            load_dotenv(dotenv_path=resolved_candidate, override=True)
             return resolved_candidate
 
     return None
@@ -127,6 +127,7 @@ XRAY_ASSETS_PATH = _resolve_xray_assets_path()
 XRAY_EXCLUDE_INBOUND_TAGS = config("XRAY_EXCLUDE_INBOUND_TAGS", default="").split()
 XRAY_SUBSCRIPTION_URL_PREFIX = ""  # subscription prefix now comes from DB
 XRAY_SUBSCRIPTION_PATH = config("XRAY_SUBSCRIPTION_PATH", default="sub").strip("/")
+SUBSCRIPTION_READ_ONLY = config("SUBSCRIPTION_READ_ONLY", cast=_cast_bool_compat, default=False)
 XRAY_JSON = config("XRAY_JSON", default="/var/lib/rebecca/xray_config.json")
 XRAY_LOG_DIR = config("XRAY_LOG_DIR", default="").strip()
 
@@ -159,6 +160,10 @@ LOGIN_NOTIFY_WHITE_LIST = [
     ip.strip() for ip in config("LOGIN_NOTIFY_WHITE_LIST", default="", cast=str).split(",") if ip.strip()
 ]
 
+TELEGRAM_REPORT_SEND_TIMEOUT_SECONDS = config("TELEGRAM_REPORT_SEND_TIMEOUT_SECONDS", default=8, cast=int)
+TELEGRAM_REPORT_WORKERS = config("TELEGRAM_REPORT_WORKERS", default=2, cast=int)
+TELEGRAM_REPORT_QUEUE_LIMIT = config("TELEGRAM_REPORT_QUEUE_LIMIT", default=1000, cast=int)
+
 USE_CUSTOM_JSON_DEFAULT = config("USE_CUSTOM_JSON_DEFAULT", default=False, cast=_cast_bool_compat)
 USE_CUSTOM_JSON_FOR_V2RAYN = config("USE_CUSTOM_JSON_FOR_V2RAYN", default=False, cast=_cast_bool_compat)
 USE_CUSTOM_JSON_FOR_V2RAYNG = config("USE_CUSTOM_JSON_FOR_V2RAYNG", default=False, cast=_cast_bool_compat)
@@ -176,6 +181,12 @@ USERS_AUTODELETE_DAYS = config("USERS_AUTODELETE_DAYS", default=-1, cast=int)
 USER_AUTODELETE_INCLUDE_LIMITED_ACCOUNTS = config(
     "USER_AUTODELETE_INCLUDE_LIMITED_ACCOUNTS", default=False, cast=_cast_bool_compat
 )
+USERS_LIST_LINKS_ENABLED = config("USERS_LIST_LINKS_ENABLED", default=True, cast=_cast_bool_compat)
+USERS_LIST_SUBSCRIPTION_URLS_ENABLED = config(
+    "USERS_LIST_SUBSCRIPTION_URLS_ENABLED", default=True, cast=_cast_bool_compat
+)
+USERS_LIST_TIMEOUT_SECONDS = config("USERS_LIST_TIMEOUT_SECONDS", default=0, cast=float)
+USERS_LIST_TIMEOUT_KILL_QUERY = config("USERS_LIST_TIMEOUT_KILL_QUERY", default=True, cast=_cast_bool_compat)
 
 
 # USERNAME: PASSWORD
@@ -212,9 +223,21 @@ JOB_CORE_HEALTH_CHECK_INTERVAL = config("JOB_CORE_HEALTH_CHECK_INTERVAL", cast=i
 JOB_RECORD_NODE_USAGES_INTERVAL = config("JOB_RECORD_NODE_USAGES_INTERVAL", cast=int, default=30)
 NODE_HEALTH_CACHE_SECONDS = config("NODE_HEALTH_CACHE_SECONDS", cast=int, default=60)
 JOB_RECORD_USER_USAGES_INTERVAL = config("JOB_RECORD_USER_USAGES_INTERVAL", cast=int, default=10)
+ONLINE_ACTIVE_WINDOW_SECONDS = config("ONLINE_ACTIVE_WINDOW_SECONDS", cast=int, default=20)
 JOB_REVIEW_USERS_INTERVAL = config("JOB_REVIEW_USERS_INTERVAL", cast=int, default=10)
 JOB_SEND_NOTIFICATIONS_INTERVAL = config("JOB_SEND_NOTIFICATIONS_INTERVAL", cast=int, default=30)
 JOB_REVIEW_USERS_BATCH_SIZE = config("JOB_REVIEW_USERS_BATCH_SIZE", cast=int, default=200)
+JOB_RECORD_USER_USAGE_COLLECT_TIMEOUT = config("JOB_RECORD_USER_USAGE_COLLECT_TIMEOUT", cast=int, default=8)
+JOB_RECORD_USER_USAGE_WORKERS = config("JOB_RECORD_USER_USAGE_WORKERS", cast=int, default=10)
+JOB_RECORD_NODE_USAGE_COLLECT_TIMEOUT = config("JOB_RECORD_NODE_USAGE_COLLECT_TIMEOUT", cast=int, default=8)
+JOB_RECORD_NODE_USAGE_WORKERS = config("JOB_RECORD_NODE_USAGE_WORKERS", cast=int, default=10)
+JOB_USAGE_DB_MAX_RETRIES = config("JOB_USAGE_DB_MAX_RETRIES", cast=int, default=1)
+JOB_USAGE_DB_LOCK_WAIT_TIMEOUT = config("JOB_USAGE_DB_LOCK_WAIT_TIMEOUT", cast=int, default=5)
+JOB_USAGE_WRITE_BATCH_SIZE = config("JOB_USAGE_WRITE_BATCH_SIZE", cast=int, default=1000)
+JOB_USAGE_ENFORCE_BATCH_SIZE = config("JOB_USAGE_ENFORCE_BATCH_SIZE", cast=int, default=500)
+JOB_USAGE_DUE_ENFORCE_BATCH_SIZE = config("JOB_USAGE_DUE_ENFORCE_BATCH_SIZE", cast=int, default=25)
+JOB_USAGE_DUE_ENFORCE_MAX_BATCHES = config("JOB_USAGE_DUE_ENFORCE_MAX_BATCHES", cast=int, default=1)
+JOB_USAGE_DUE_ENFORCE_TIME_BUDGET = config("JOB_USAGE_DUE_ENFORCE_TIME_BUDGET", cast=int, default=5)
 
 
 def _parse_xray_hosts():

@@ -1,4 +1,5 @@
 import {
+	Box,
 	HStack,
 	Icon,
 	Tab,
@@ -7,6 +8,7 @@ import {
 	TabPanels,
 	Tabs,
 	Text,
+	useColorModeValue,
 	VStack,
 } from "@chakra-ui/react";
 import { LinkIcon, Squares2X2Icon } from "@heroicons/react/24/outline";
@@ -22,6 +24,8 @@ export const HostsPage: FC = () => {
 	const { t } = useTranslation();
 	const { userData, getUserIsSuccess } = useGetUser();
 	const { fetchHosts } = useHosts();
+	const panelBg = useColorModeValue("gray.50", "whiteAlpha.50");
+	const panelBorder = useColorModeValue("blackAlpha.200", "whiteAlpha.200");
 	const [activeTab, setActiveTab] = useState<number>(0);
 	const tabKeys = useMemo(() => ["inbounds", "hosts"], []);
 	const hostsTabIndex = 1;
@@ -73,38 +77,119 @@ export const HostsPage: FC = () => {
 	if (!canManageHosts) {
 		return (
 			<VStack spacing={4} align="stretch">
-				<Text as="h1" fontWeight="semibold" fontSize="2xl">
-					{t("header.hostSettings", "Inbounds & Hosts")}
-				</Text>
-				<Text fontSize="sm" color="gray.500" _dark={{ color: "gray.400" }}>
-					{t(
-						"hostsPage.noPermission",
-						"You do not have permission to manage host or inbound settings.",
-					)}
-				</Text>
+				<Box
+					borderWidth="1px"
+					borderColor={panelBorder}
+					borderRadius="md"
+					bg={panelBg}
+					p={4}
+				>
+					<Text as="h1" fontWeight="semibold" fontSize="2xl">
+						{t("header.hostSettings", "Inbounds & Hosts")}
+					</Text>
+					<Text
+						fontSize="sm"
+						color="gray.500"
+						_dark={{ color: "gray.400" }}
+						mt={2}
+					>
+						{t(
+							"hostsPage.noPermission",
+							"You do not have permission to manage host or inbound settings.",
+						)}
+					</Text>
+				</Box>
 			</VStack>
 		);
 	}
 
 	return (
 		<VStack spacing={4} align="stretch">
-			<Text as="h1" fontWeight="semibold" fontSize="2xl">
-				{t("header.hostSettings", "Inbounds & Hosts")}
-			</Text>
+			<Box
+				borderWidth="1px"
+				borderColor={panelBorder}
+				borderRadius="md"
+				bg={panelBg}
+				p={4}
+			>
+				<Text as="h1" fontWeight="semibold" fontSize="2xl">
+					{t("header.hostSettings", "Inbounds & Hosts")}
+				</Text>
+				<Text
+					fontSize="sm"
+					color="gray.600"
+					_dark={{ color: "gray.300" }}
+					mt={2}
+				>
+					{t(
+						"hostsPage.pageDescription",
+						"Manage inbound listeners and host rules from one focused workspace.",
+					)}
+				</Text>
+			</Box>
 			<Tabs
-				colorScheme="primary"
+				variant="unstyled"
 				isLazy
 				index={activeTab}
 				onChange={handleTabChange}
 			>
-				<TabList>
-					<Tab>
+				<TabList
+					borderWidth="1px"
+					borderColor={panelBorder}
+					borderRadius="md"
+					bg={panelBg}
+					p={{ base: 1, md: 2 }}
+					gap={{ base: 1.5, md: 2 }}
+					overflowX="auto"
+					overflowY="hidden"
+					flexWrap="nowrap"
+					maxW="full"
+					sx={{
+						WebkitOverflowScrolling: "touch",
+						overscrollBehaviorInline: "contain",
+						scrollbarWidth: "none",
+						scrollPaddingInline: "8px",
+						scrollSnapType: "x proximity",
+						"&::-webkit-scrollbar": { display: "none" },
+					}}
+				>
+					<Tab
+						borderRadius="md"
+						px={{ base: 3, md: 4 }}
+						py={2}
+						minH={{ base: "40px", md: "36px" }}
+						flexShrink={0}
+						fontWeight="semibold"
+						color="gray.500"
+						whiteSpace="nowrap"
+						sx={{ scrollSnapAlign: "start" }}
+						_selected={{
+							bg: "primary.500",
+							color: "white",
+						}}
+						_dark={{ color: "gray.300" }}
+					>
 						<HStack spacing={2}>
 							<Icon as={LinkIcon} w={4} h={4} />
 							<span>{t("hostsPage.tabInbounds", "Inbounds")}</span>
 						</HStack>
 					</Tab>
-					<Tab>
+					<Tab
+						borderRadius="md"
+						px={{ base: 3, md: 4 }}
+						py={2}
+						minH={{ base: "40px", md: "36px" }}
+						flexShrink={0}
+						fontWeight="semibold"
+						color="gray.500"
+						whiteSpace="nowrap"
+						sx={{ scrollSnapAlign: "start" }}
+						_selected={{
+							bg: "primary.500",
+							color: "white",
+						}}
+						_dark={{ color: "gray.300" }}
+					>
 						<HStack spacing={2}>
 							<Icon as={Squares2X2Icon} w={4} h={4} />
 							<span>{t("hostsPage.tabHosts", "Hosts")}</span>

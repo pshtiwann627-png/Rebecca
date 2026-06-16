@@ -6,7 +6,7 @@ from functools import partial
 
 from app.db import GetDB
 from app.db.models import Node, OutboundTraffic
-from app.jobs.usage.collectors import get_outbounds_stats
+from app.jobs.usage.collectors import get_outbounds_stats, resolve_stats_api
 from app.jobs.usage.delivery_buffer import usage_delivery_buffer
 from app.runtime import xray
 from app.utils.outbound import extract_outbound_metadata, generate_outbound_id
@@ -154,6 +154,10 @@ def _is_missing_node_usage_endpoint(exc: Exception) -> bool:
 
 
 def _collect_node_outbound_stats(node):
+    api = resolve_stats_api(node)
+    if api is not None:
+        return {"stats": get_outbounds_stats(api), "node_batch_id": ""}
+
     if not hasattr(node, "collect_outbound_stats"):
         return {"stats": get_outbounds_stats(node.api), "node_batch_id": ""}
     try:
@@ -211,10 +215,19 @@ def record_outbound_traffic():
             for node_id, future in futures.items():
                 try:
                     result = future.result()
+                    node_batch_id = ""
                     if isinstance(result, dict):
-                        node_batches[node_id] = result.get("node_batch_id") or ""
+                        node_batch_id = result.get("node_batch_id") or ""
+                        node_batches[node_id] = node_batch_id
                         result = result.get("stats") or []
-                    api_params[node_id] = usage_delivery_buffer.add_outbound_stats(node_id, result)
+                    if node_batch_id:
+                        api_params[node_id] = usage_delivery_buffer.replace_outbound_stats(
+                            node_id,
+                            result,
+                            node_batch_id,
+                        )
+                    else:
+                        api_params[node_id] = usage_delivery_buffer.add_outbound_stats(node_id, result)
                 except Exception as e:
                     logger.warning(
                         f"Failed to get outbound stats from {'master' if node_id is None else f'node {node_id}'}: {e}"

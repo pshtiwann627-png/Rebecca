@@ -27,6 +27,9 @@ REBECCA_SCRIPT_BASE_URL="${REBECCA_SCRIPT_BASE_URL:-${REBECCA_RAW_BASE}/scripts/
 REBECCA_RELEASE_REPO="${REBECCA_RELEASE_REPO:-rebeccapanel/Rebecca}"
 REBECCA_BINARY_DEV_BRANCH="${REBECCA_BINARY_DEV_BRANCH:-dev}"
 REBECCA_BINARY_WORKFLOW_NAME="${REBECCA_BINARY_WORKFLOW_NAME:-binary-build}"
+REBECCA_BINARY_DEV_MANIFEST_BRANCH="${REBECCA_BINARY_DEV_MANIFEST_BRANCH:-dev-build-manifest}"
+REBECCA_BINARY_DEV_MANIFEST_PATH="${REBECCA_BINARY_DEV_MANIFEST_PATH:-dev-builds.json}"
+REBECCA_BINARY_DEV_MANIFEST_URL="${REBECCA_BINARY_DEV_MANIFEST_URL:-}"
 INSTALL_MODE_FILE="$APP_DIR/.install-mode"
 CHANNEL_FILE="$APP_DIR/.channel"
 BINARY_BIN_DIR="$APP_DIR/bin"
@@ -185,6 +188,9 @@ set_rebecca_source_ref() {
 set_rebecca_source_for_version() {
     case "${1:-latest}" in
         dev)
+            set_rebecca_source_ref "$REBECCA_BINARY_DEV_BRANCH"
+            ;;
+        dev-*)
             set_rebecca_source_ref "$REBECCA_BINARY_DEV_BRANCH"
             ;;
         v[0-9]*)
@@ -1966,7 +1972,7 @@ services:
       - /var/lib/rebecca/logs:/var/lib/rebecca-node
     depends_on:
       mariadb:
-        condition: service_healthy
+        condition: service_started
 
   mariadb:
     image: mariadb:lts
@@ -1997,12 +2003,11 @@ services:
     volumes:
       - /var/lib/rebecca/mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      start_period: 10s
-      start_interval: 3s
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 --protocol=tcp --silent || mysqladmin ping -h 127.0.0.1 --protocol=tcp --silent || exit 1"]
+      start_period: 30s
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 30
 EOF
         echo "----------------------------"
         colorized_echo red "Using MariaDB as database"
@@ -2026,8 +2031,7 @@ EOF
         sed -i 's~\(XRAY_JSON = \).*~\1"/var/lib/rebecca/xray_config.json"~' "$APP_DIR/.env"
 
 
-        prompt_for_rebecca_password
-        MYSQL_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+        ensure_docker_mysql_credentials
         MYSQL_PASSWORD_URL_ENCODED=$(urlencode_value "$MYSQL_PASSWORD")
         
         echo "" >> "$ENV_FILE"
@@ -2067,7 +2071,7 @@ services:
       - /var/lib/rebecca/logs:/var/lib/rebecca-node
     depends_on:
       mysql:
-        condition: service_healthy
+        condition: service_started
 
   mysql:
     image: mysql:8.4
@@ -2098,11 +2102,11 @@ services:
     volumes:
       - /var/lib/rebecca/mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "rebecca", "--password=\${MYSQL_PASSWORD}"]
-      start_period: 5s
-      interval: 5s
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --protocol=tcp --silent || exit 1"]
+      start_period: 30s
+      interval: 10s
       timeout: 5s
-      retries: 55
+      retries: 30
       
 EOF
         echo "----------------------------"
@@ -2127,8 +2131,7 @@ EOF
         sed -i 's~\(XRAY_JSON = \).*~\1"/var/lib/rebecca/xray_config.json"~' "$APP_DIR/.env"
 
 
-        prompt_for_rebecca_password
-        MYSQL_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+        ensure_docker_mysql_credentials
         MYSQL_PASSWORD_URL_ENCODED=$(urlencode_value "$MYSQL_PASSWORD")
         
         echo "" >> "$ENV_FILE"
@@ -2315,8 +2318,53 @@ get_binary_release_asset_metadata() {
     printf 'archive|%s|%s|\n' "${resolved_tag:-$rebecca_version}" "$legacy_asset_url"
 }
 
+get_binary_dev_manifest_url() {
+    if [ -n "$REBECCA_BINARY_DEV_MANIFEST_URL" ]; then
+        printf '%s\n' "$REBECCA_BINARY_DEV_MANIFEST_URL"
+        return
+    fi
+    printf 'https://raw.githubusercontent.com/%s/%s/%s\n' \
+        "$REBECCA_RELEASE_REPO" \
+        "$REBECCA_BINARY_DEV_MANIFEST_BRANCH" \
+        "$REBECCA_BINARY_DEV_MANIFEST_PATH"
+}
+
+get_binary_dev_manifest_metadata() {
+    local binary_arch="$1"
+    local requested_version="${2:-dev}"
+    local manifest_url
+    local manifest_payload
+    local selected
+
+    manifest_url=$(get_binary_dev_manifest_url)
+    manifest_payload=$(curl -fsSL "$manifest_url") || return 1
+
+    selected=$(echo "$manifest_payload" | jq -r \
+        --arg arch "linux-${binary_arch}" \
+        --arg requested "$requested_version" '
+        . as $root
+        | def selected_build:
+            if ($requested != "" and $requested != "dev") then
+                ($root.builds[]? | select(.tag == $requested))
+            else
+                (($root.builds[]? | select(.tag == ($root.latest // ""))) // $root.builds[0]?)
+            end;
+        selected_build as $build
+        | ($build.assets[$arch] // empty) as $asset
+        | select(($build.tag // "") != "" and ($asset.url // "") != "")
+        | [$build.tag, $asset.url, ($asset.name // "")] | @tsv
+    ' | head -n 1)
+
+    if [ -z "$selected" ]; then
+        return 1
+    fi
+
+    printf '%s\n' "$selected" | awk -F '\t' '{ printf "%s|%s|%s\n", $1, $2, $3 }'
+}
+
 get_binary_dev_artifact_metadata() {
     local binary_arch="$1"
+    local requested_version="${2:-dev}"
     local workflow_runs_api
     local workflow_runs_payload
     local latest_run_json
@@ -2328,6 +2376,15 @@ get_binary_dev_artifact_metadata() {
     local artifact_url
     local nightly_workflow
     local workflow_path
+
+    if get_binary_dev_manifest_metadata "$binary_arch" "$requested_version"; then
+        return
+    fi
+
+    if [ "$requested_version" != "dev" ]; then
+        colorized_echo red "Dev binary build ${requested_version} was not found in $(get_binary_dev_manifest_url)." >&2
+        exit 1
+    fi
 
     nightly_workflow="$REBECCA_BINARY_WORKFLOW_NAME"
     case "$nightly_workflow" in
@@ -2374,7 +2431,7 @@ get_binary_dev_artifact_metadata() {
     fi
 
     artifact_url="https://nightly.link/${REBECCA_RELEASE_REPO}/workflows/${nightly_workflow}/${REBECCA_BINARY_DEV_BRANCH}/${artifact_name}.zip"
-    printf '%s|%s\n' "dev-${head_sha:0:7}" "$artifact_url"
+    printf '%s|%s|%s.zip\n' "dev-${head_sha:0:7}" "$artifact_url" "$artifact_name"
 }
 
 install_binary_cli_launcher() {
@@ -2454,6 +2511,7 @@ install_binary_rebecca() {
     local server_asset_url
     local cli_asset_url
     local artifact_url
+    local artifact_name
     local tmp_dir
     local package_path=""
     local dev_package_path=""
@@ -2470,17 +2528,26 @@ install_binary_rebecca() {
     binary_arch=$(detect_binary_arch)
     tmp_dir=$(mktemp -d)
 
-    if [ "$rebecca_version" = "dev" ]; then
-        IFS='|' read -r resolved_version artifact_url < <(get_binary_dev_artifact_metadata "$binary_arch")
-        package_path="$tmp_dir/rebecca-binaries.zip"
+    if [[ "$rebecca_version" = "dev" || "$rebecca_version" == dev-* ]]; then
+        IFS='|' read -r resolved_version artifact_url artifact_name < <(get_binary_dev_artifact_metadata "$binary_arch" "$rebecca_version")
+        artifact_name="${artifact_name:-rebecca-binaries.zip}"
+        package_path="$tmp_dir/$artifact_name"
         colorized_echo blue "Downloading Rebecca binary dev artifact"
         curl -fL "$artifact_url" -o "$package_path"
-        unzip -j -o "$package_path" -d "$tmp_dir" >/dev/null
-        dev_package_path="$tmp_dir/rebecca-linux-${binary_arch}.tar.gz"
-        if [ -f "$dev_package_path" ]; then
-            tar -xzf "$dev_package_path" -C "$tmp_dir"
-        elif ls "$tmp_dir"/rebecca-*.tar.gz >/dev/null 2>&1; then
-            tar -xzf "$(ls "$tmp_dir"/rebecca-*.tar.gz | head -n 1)" -C "$tmp_dir"
+        if [[ "$package_path" == *.zip ]]; then
+            unzip -j -o "$package_path" -d "$tmp_dir" >/dev/null
+            dev_package_path="$tmp_dir/rebecca-linux-${binary_arch}.tar.gz"
+            if [ -f "$dev_package_path" ]; then
+                tar -xzf "$dev_package_path" -C "$tmp_dir"
+            elif ls "$tmp_dir"/rebecca-*.tar.gz >/dev/null 2>&1; then
+                tar -xzf "$(ls "$tmp_dir"/rebecca-*.tar.gz | head -n 1)" -C "$tmp_dir"
+            fi
+        elif [[ "$package_path" == *.tar.gz ]]; then
+            tar -xzf "$package_path" -C "$tmp_dir"
+        else
+            colorized_echo red "Unsupported dev binary asset format: $artifact_name" >&2
+            rm -rf "$tmp_dir"
+            exit 1
         fi
     else
         IFS='|' read -r binary_source_type resolved_version server_asset_url cli_asset_url < <(get_binary_release_asset_metadata "$rebecca_version" "$binary_arch")
@@ -2551,7 +2618,18 @@ up_rebecca() {
         return
     fi
 
+    repair_docker_compose_startup_gates
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" up -d --remove-orphans
+}
+
+repair_docker_compose_startup_gates() {
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        return
+    fi
+
+    if grep -q "condition:[[:space:]]*service_healthy" "$COMPOSE_FILE" 2>/dev/null; then
+        sed -i -E 's/condition:[[:space:]]*service_healthy/condition: service_started/g' "$COMPOSE_FILE"
+    fi
 }
 
 follow_rebecca_logs() {
@@ -2611,6 +2689,10 @@ prompt_for_rebecca_password() {
     if [ -n "${MYSQL_PASSWORD:-}" ]; then
         return
     fi
+    MYSQL_PASSWORD=$(get_env_value "MYSQL_PASSWORD")
+    if [ -n "${MYSQL_PASSWORD:-}" ]; then
+        return
+    fi
     if [ ! -t 0 ]; then
         MYSQL_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
         colorized_echo green "A secure database password has been generated automatically."
@@ -2631,6 +2713,22 @@ prompt_for_rebecca_password() {
 
     # Пауза 3 секунды перед продолжением
     sleep 3
+}
+
+ensure_docker_mysql_credentials() {
+    local existing_root_password
+
+    prompt_for_rebecca_password
+
+    existing_root_password=$(get_env_value "MYSQL_ROOT_PASSWORD")
+    if [ -n "${MYSQL_ROOT_PASSWORD:-}" ]; then
+        return
+    fi
+    if [ -n "$existing_root_password" ]; then
+        MYSQL_ROOT_PASSWORD="$existing_root_password"
+    else
+        MYSQL_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+    fi
 }
 
 sql_escape_literal() {
@@ -2878,6 +2976,10 @@ install_command() {
         if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
             return 0
         fi
+        if [[ "$version" =~ ^dev-[0-9a-fA-F]{7,40}$ ]]; then
+            [ "$install_mode" = "binary" ]
+            return
+        fi
         
         # Fetch the release data from GitHub API
         response=$(curl -s "$repo_url")
@@ -2890,7 +2992,7 @@ install_command() {
         fi
     }
     # Check if the version is valid and exists
-    if [[ "$rebecca_version" == "latest" || "$rebecca_version" == "dev" || "$rebecca_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$rebecca_version" == "latest" || "$rebecca_version" == "dev" || "$rebecca_version" =~ ^dev-[0-9a-fA-F]{7,40}$ || "$rebecca_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         if check_version_exists "$rebecca_version"; then
             if [ "$install_mode" = "binary" ]; then
                 install_binary_rebecca "$rebecca_version" "$database_type"
@@ -3344,7 +3446,7 @@ update_command() {
                 shift 2
                 ;;
             -h|--help)
-                colorized_echo red "Usage: rebecca update [--dev | --version vX.Y.Z]"
+                colorized_echo red "Usage: rebecca update [--dev | --version vX.Y.Z|dev-abcdef0]"
                 exit 0
                 ;;
             *)
@@ -3366,6 +3468,10 @@ update_command() {
     set_rebecca_source_for_version "$rebecca_version"
 
     if ! is_binary_install; then
+        if [[ "$rebecca_version" =~ ^dev-[0-9a-fA-F]{7,40}$ ]]; then
+            colorized_echo red "Specific dev binary versions are available only for binary installations."
+            exit 1
+        fi
         detect_compose
     fi
     

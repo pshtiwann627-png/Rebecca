@@ -5,6 +5,8 @@ Routers call into this module to apply user business rules and build API respons
 """
 
 import json
+import secrets
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Union
@@ -21,6 +23,14 @@ from app.utils.credentials import UUID_PROTOCOLS, uuid_to_key
 from app.services.data_access import get_inbounds_by_tag_cached, get_service_host_map_cached
 from app.db.models import ServiceHostLink
 from app.db.crud.user import ONLINE_ACTIVE_WINDOW, OFFLINE_STALE_WINDOW, UPDATE_STALE_WINDOW, STATUS_FILTER_MAP
+from config import USERS_LIST_SUBSCRIPTION_URLS_ENABLED
+from app.utils.jwt import create_subscription_token
+
+
+def _log_users_step(step: str, started_at: float) -> None:
+    elapsed = time.perf_counter() - started_at
+    if elapsed >= 0.5:
+        logger.info("USERS: %s finished in %.3f s", step, elapsed)
 
 
 def _compute_subscription_links(
@@ -30,18 +40,89 @@ def _compute_subscription_links(
     admin=None,
     admin_id: Optional[int] = None,
     request_origin: Optional[str] = None,
+    subadress: Optional[str] = None,
+    list_link_context: Optional[dict] = None,
 ) -> tuple[str, dict]:
     """
     Compute subscription links for list items without constructing heavy models.
     Falls back to empty values on failure.
     """
+    if not USERS_LIST_SUBSCRIPTION_URLS_ENABLED:
+        return _compute_primary_subscription_link(
+            username,
+            credential_key,
+            admin=admin,
+            admin_id=admin_id,
+            request_origin=request_origin,
+            subadress=subadress,
+            list_link_context=list_link_context,
+        )
+
     try:
-        payload = SimpleNamespace(username=username, credential_key=credential_key, admin=admin, admin_id=admin_id)
+        payload = SimpleNamespace(
+            username=username,
+            credential_key=credential_key,
+            admin=admin,
+            admin_id=admin_id,
+            subadress=subadress or "",
+        )
         links = build_subscription_links(payload, request_origin=request_origin)
         primary = links.get("primary", "")
         return primary or "", links
     except Exception as exc:
         logger.debug("Failed to build subscription links for %s: %s", username, exc)
+        return "", {}
+
+
+def _compute_primary_subscription_link(
+    username: str,
+    credential_key: Optional[str],
+    *,
+    admin=None,
+    admin_id: Optional[int] = None,
+    request_origin: Optional[str] = None,
+    subadress: Optional[str] = None,
+    list_link_context: Optional[dict] = None,
+) -> tuple[str, dict]:
+    try:
+        from app.services.panel_settings import PanelSettingsService
+        from app.services.subscription_settings import SubscriptionSettingsService
+
+        preferred = None
+        base = "/sub"
+        if list_link_context:
+            preferred = list_link_context.get("default_subscription_type")
+            settings_by_admin_id = list_link_context.get("settings_by_admin_id") or {}
+            effective_settings = settings_by_admin_id.get(admin_id)
+            if effective_settings is None:
+                effective_settings = list_link_context.get("default_effective_settings")
+            if effective_settings is not None:
+                bases = SubscriptionSettingsService.build_subscription_bases(
+                    effective_settings,
+                    salt=secrets.token_hex(8),
+                    request_origin=request_origin,
+                )
+                base = bases[0] if bases else base
+        if preferred is None:
+            preferred = PanelSettingsService.get_settings(ensure_record=True).default_subscription_type or "key"
+
+        subadress = (subadress or "").strip()
+        if subadress:
+            url = f"{base}/{subadress}"
+            return url, {"subadress": url}
+
+        if credential_key and preferred == "username-key":
+            url = f"{base}/{username}/{credential_key}"
+            return url, {"username-key": url}
+        if credential_key and preferred == "key":
+            url = f"{base}/{credential_key}"
+            return url, {"key": url}
+
+        token = create_subscription_token(username)
+        url = f"{base}/{token}"
+        return url, {"token": url}
+    except Exception as exc:
+        logger.debug("Failed to build primary subscription link for %s: %s", username, exc)
         return "", {}
 
 
@@ -114,6 +195,7 @@ def _map_raw_to_list_item(
     include_links: bool = False,
     admin_lookup: Optional[Dict[int, Admin]] = None,
     request_origin: Optional[str] = None,
+    list_link_context: Optional[dict] = None,
 ) -> UserListItem:
     admin_obj = None
     if admin_lookup:
@@ -124,6 +206,8 @@ def _map_raw_to_list_item(
         admin=admin_obj,
         admin_id=raw.get("admin_id"),
         request_origin=request_origin,
+        subadress=raw.get("subadress"),
+        list_link_context=list_link_context,
     )
     return UserListItem(
         username=raw.get("username"),
@@ -150,12 +234,16 @@ def _map_user_to_list_item(
     include_links: bool = False,
     link_context: Optional[dict] = None,
     request_origin: Optional[str] = None,
+    list_link_context: Optional[dict] = None,
 ) -> UserListItem:
     subscription_url, subscription_urls = _compute_subscription_links(
         getattr(user, "username", ""),
         getattr(user, "credential_key", None),
         admin=getattr(user, "admin", None),
+        admin_id=getattr(user, "admin_id", None),
         request_origin=request_origin,
+        subadress=getattr(user, "subadress", None),
+        list_link_context=list_link_context,
     )
     links: List[str] = []
     if include_links:
@@ -193,6 +281,35 @@ def _build_admin_lookup(db: Session, users: List[dict]) -> Dict[int, Admin]:
         if getattr(admin, "id", None) is not None:
             lookup[int(admin.id)] = admin
     return lookup
+
+
+def _build_list_subscription_context(
+    db: Session,
+    admin_lookup: Optional[Dict[int, Admin]],
+) -> dict:
+    if USERS_LIST_SUBSCRIPTION_URLS_ENABLED:
+        return {}
+
+    try:
+        from app.services.panel_settings import PanelSettingsService
+        from app.services.subscription_settings import SubscriptionSettingsService
+
+        default_subscription_type = PanelSettingsService.get_settings(ensure_record=True, db=db).default_subscription_type
+        default_effective_settings = SubscriptionSettingsService.get_effective_settings(None)
+        settings_by_admin_id: Dict[Optional[int], object] = {None: default_effective_settings}
+        for admin_id, admin in (admin_lookup or {}).items():
+            try:
+                settings_by_admin_id[admin_id] = SubscriptionSettingsService.get_effective_settings(admin)
+            except Exception:
+                settings_by_admin_id[admin_id] = default_effective_settings
+        return {
+            "default_subscription_type": default_subscription_type or "key",
+            "default_effective_settings": default_effective_settings,
+            "settings_by_admin_id": settings_by_admin_id,
+        }
+    except Exception as exc:
+        logger.debug("Failed to build list subscription context: %s", exc)
+        return {}
 
 
 def _build_links_context(db: Session, users: List[User]) -> dict:
@@ -530,6 +647,7 @@ def get_users_list_db_only(
 ) -> UsersResponse:
     """Build a user list directly from database queries."""
     if include_links:
+        step_started = time.perf_counter()
         users, count = crud.get_users(
             db=db,
             offset=offset,
@@ -545,20 +663,31 @@ def get_users_list_db_only(
             return_with_count=True,
             force_db=True,
         )
+        _log_users_step("list-fetch-with-links", step_started)
 
+        step_started = time.perf_counter()
         for user in users:
             _apply_pending_usage_to_model(user)
         link_context = _build_links_context(db, users)
+        admin_lookup = {
+            int(user.admin_id): user.admin
+            for user in users
+            if getattr(user, "admin_id", None) is not None and getattr(user, "admin", None) is not None
+        }
+        list_link_context = _build_list_subscription_context(db, admin_lookup)
         items = [
             _map_user_to_list_item(
                 u,
                 include_links=include_links,
                 link_context=link_context,
                 request_origin=request_origin,
+                list_link_context=list_link_context,
             )
             for u in users
         ]
+        _log_users_step("list-map-with-links", step_started)
     else:
+        step_started = time.perf_counter()
         users, count = crud.get_users_list_rows(
             db=db,
             offset=offset,
@@ -573,23 +702,31 @@ def get_users_list_db_only(
             admins=owners,
             return_with_count=True,
         )
+        _log_users_step("list-fetch-rows", step_started)
 
+        step_started = time.perf_counter()
         for user in users:
             _apply_pending_usage_to_dict(user)
         admin_lookup = _build_admin_lookup(db, users)
+        list_link_context = _build_list_subscription_context(db, admin_lookup)
         items = [
             _map_raw_to_list_item(
                 u,
                 include_links=False,
                 admin_lookup=admin_lookup,
                 request_origin=request_origin,
+                list_link_context=list_link_context,
             )
             for u in users
         ]
+        _log_users_step("list-map-rows", step_started)
 
     if active_total is None and dbadmin:
+        step_started = time.perf_counter()
         active_total = crud.get_users_count(db, status=UserStatus.active, admin=dbadmin)
+        _log_users_step("active-total", step_started)
 
+    step_started = time.perf_counter()
     status_breakdown = crud.get_users_status_breakdown(
         db=db,
         search=search,
@@ -599,6 +736,8 @@ def get_users_list_db_only(
         advanced_filters=advanced_filters,
         service_id=service_id,
     )
+    _log_users_step("status-breakdown", step_started)
+    step_started = time.perf_counter()
     usage_total = crud.get_users_usage_sum(
         db=db,
         search=search,
@@ -608,6 +747,8 @@ def get_users_list_db_only(
         advanced_filters=advanced_filters,
         service_id=service_id,
     )
+    _log_users_step("usage-total", step_started)
+    step_started = time.perf_counter()
     online_total = crud.get_users_online_count(
         db=db,
         search=search,
@@ -617,6 +758,7 @@ def get_users_list_db_only(
         advanced_filters=advanced_filters,
         service_id=service_id,
     )
+    _log_users_step("online-total", step_started)
 
     return UsersResponse(
         users=items,
