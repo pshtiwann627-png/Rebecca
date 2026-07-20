@@ -8,10 +8,16 @@
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3,
-    "startCommand": "./dist/rebecca-server",
+    "startCommand": "sh -c './dist/rebecca-server 2>&1 | tee /proc/1/fd/1'",
     "healthcheckPath": "/dashboard/",
     "healthcheckTimeout": 300,
     "healthcheckInterval": 30,
-    "memory": 2048
+    "memory": 2048,
+    "ports": [
+      {
+        "port": 8000,
+        "protocol": "tcp"
+      }
+    ]
   }
 }
