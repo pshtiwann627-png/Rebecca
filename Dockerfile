@@ -10,23 +10,29 @@ WORKDIR /app
 COPY dashboard/ dashboard/
 RUN cd dashboard && npm ci && VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۳: تصویر نهایی (سبک و بدون مشکل tmp)
-FROM debian:bullseye-slim AS final
+# مرحله ۳: تصویر نهایی (بدون mount، کاملاً سازگار با Railway)
+FROM debian:bullseye-slim
 WORKDIR /opt/rebecca
 
-# به‌جای RUN یکجا، از RUN --mount=type=cache برای کش استفاده کن
-RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# به‌روزرسانی و نصب curl در یک مرحله
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
 
+# کپی فایل‌های ساخته‌شده
 COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 COPY .env.example .env
+
+# دسترسی اجرایی
 RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
 
-# نصب Xray (با کش جداگانه)
-RUN --mount=type=cache,target=/var/cache/apt \
-    curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- install
+# نصب Xray
+RUN curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- install
 
+# پورت پیش‌فرض
 EXPOSE 8000
+
+# دستور اجرا
 CMD ["./dist/rebecca-server"]
