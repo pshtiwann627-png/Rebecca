@@ -23,7 +23,7 @@ RUN uv sync --group build
 RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 WORKDIR /opt/rebecca
 
 RUN apt-get update && \
