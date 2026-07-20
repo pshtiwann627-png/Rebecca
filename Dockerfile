@@ -1,14 +1,19 @@
-# مرحله ۱: ساخت بک‌اند Go
-FROM golang:1.22 AS builder
-WORKDIR /app
-COPY . .
-RUN bash scripts/build_binary.sh
-
-# مرحله ۲: ساخت فرانت‌اند React
+# مرحله ۱: ساخت فرانت‌اند React (اول)
 FROM node:20 AS frontend-builder
 WORKDIR /app
 COPY dashboard/ dashboard/
-RUN cd dashboard && npm ci && VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
+RUN cd dashboard && \
+    npm ci && \
+    VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
+
+# مرحله ۲: ساخت بک‌اند Go (بعد از فرانت‌اند)
+FROM golang:1.22 AS builder
+WORKDIR /app
+# کل کد را کپی کن
+COPY . .
+# ولی قبل از اجرای اسکریپت، داشبورد ساخته‌شده را از مرحله قبل به مسیر درست کپی کن
+COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
+RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
 FROM debian:bullseye-slim
@@ -22,7 +27,7 @@ COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# متغیرهای محیطی مستقیماً در تصویر
+# متغیرهای محیطی
 ENV SUDO_USERNAME=admin
 ENV SUDO_PASSWORD=admin123
 ENV SQLALCHEMY_DATABASE_URL=sqlite:///var/lib/rebecca/rebecca.db
