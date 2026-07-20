@@ -22,7 +22,7 @@ COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# تعريف مستقيم متغيرهاى محيطى (بدون نياز به فايل .env)
+# متغیرهای محیطی مستقیماً در تصویر
 ENV SUDO_USERNAME=admin
 ENV SUDO_PASSWORD=admin123
 ENV SQLALCHEMY_DATABASE_URL=sqlite:///var/lib/rebecca/rebecca.db
