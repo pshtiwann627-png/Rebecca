@@ -6,13 +6,26 @@ RUN cd dashboard && \
     npm ci && \
     VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۲: ساخت بک‌اند Go (بعد از فرانت‌اند)
+# مرحله ۲: ساخت بک‌اند Go (با نصب Python و uv)
 FROM golang:1.22 AS builder
 WORKDIR /app
 # کل کد را کپی کن
 COPY . .
 # ولی قبل از اجرای اسکریپت، داشبورد ساخته‌شده را از مرحله قبل به مسیر درست کپی کن
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
+
+# نصب Python، pip، uv و PyInstaller
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# نصب uv (مدیریت وابستگی‌های Python)
+RUN pip3 install uv
+
+# همگام‌سازی وابستگی‌های build (طبق مستندات Rebecca)
+RUN uv sync --group build
+
+# حالا اسکریپت بیلد را اجرا کن
 RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
