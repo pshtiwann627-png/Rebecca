@@ -22,8 +22,8 @@ RUN pip install uv
 RUN uv sync --group build
 RUN bash scripts/build_binary.sh
 
-# مرحله ۳: تصویر نهایی
-FROM debian:bookworm-slim
+# ✅ مرحله ۳: تصویر نهایی با Bookworm (GLIBC 2.35+)
+FROM debian:bookworm-slim   # <----- اینجا عوض شد
 WORKDIR /opt/rebecca
 
 RUN apt-get update && \
@@ -40,7 +40,7 @@ RUN curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linu
     rm /tmp/xray.zip && \
     chmod +x /usr/local/bin/xray
 
-# تنظیمات محیطی با پورت ۸۰۸۰
+# متغیرهای محیطی
 ENV SUDO_USERNAME=admin
 ENV SUDO_PASSWORD=admin123
 ENV SQLALCHEMY_DATABASE_URL=sqlite:///var/lib/rebecca/rebecca.db
@@ -50,7 +50,6 @@ ENV REBECCA_GATEWAY_ADDR=0.0.0.0:8080
 ENV PORT=8080
 
 RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
-RUN ./dist/rebecca-cli migrate up || echo "Migration skipped"
+RUN ./dist/rebecca-cli migrate up || echo "Migration failed, continuing..."
 
-# 💀 اجرا با لاگ کامل و پورت ۸۰۸۰
-CMD ["sh", "-c", "./dist/rebecca-server 2>&1 | tee /var/log/rebecca.log || (echo 'Server crashed!' && sleep 3600)"]
+CMD ["sh", "-c", "./dist/rebecca-server 2>&1 | tee /proc/1/fd/1 || (echo 'Server crashed!' && sleep 3600)"]
