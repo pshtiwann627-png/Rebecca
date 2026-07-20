@@ -22,8 +22,8 @@ RUN pip install uv
 RUN uv sync --group build
 RUN bash scripts/build_binary.sh
 
-# ✅ مرحله ۳: تصویر نهایی با Bookworm (GLIBC 2.35+)
-FROM debian:bookworm-slim   # <----- اینجا عوض شد
+# مرحله ۳: تصویر نهایی با Bookworm
+FROM debian:bookworm-slim
 WORKDIR /opt/rebecca
 
 RUN apt-get update && \
