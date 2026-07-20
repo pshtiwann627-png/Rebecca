@@ -1,54 +1,27 @@
-ARG PYTHON_VERSION=3.13
+# مرحله ۱: ساخت بک‌اند Go
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY . .
+RUN bash scripts/build_binary.sh
 
-FROM ghcr.io/astral-sh/uv:python$PYTHON_VERSION-bookworm-slim AS builder
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
+# مرحله ۲: ساخت فرانت‌اند React
+FROM node:20 AS frontend-builder
+WORKDIR /app
+COPY dashboard/ dashboard/
+RUN cd dashboard && npm ci && VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
-    libc6-dev \
-    build-essential \
-    curl \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+# مرحله ۳: تصویر نهایی
+FROM debian:bullseye-slim
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/rebecca
+COPY --from=builder /app/dist/ ./dist/
+COPY --from=builder /app/scripts/ ./scripts/
+COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
+COPY .env.example .env
+RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
 
-COPY scripts/rebecca/install_latest_xray.sh /tmp/install_latest_xray.sh
+# نصب Xray
+RUN curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- install
 
-RUN sed -i 's/\r$//' /tmp/install_latest_xray.sh \
-    && bash /tmp/install_latest_xray.sh \
-    && apt-get remove --purge -y curl unzip \
-    && rm -f /tmp/install_latest_xray.sh \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev
-
-ADD . /build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
-
-FROM python:$PYTHON_VERSION-slim-bookworm
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    unzip \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /build /code
-COPY --from=builder /usr/local/share/xray /usr/local/share/xray
-COPY --from=builder /usr/local/bin/xray /usr/local/bin/xray
-
-WORKDIR /code
-
-ENV PATH="/code/.venv/bin:$PATH"
-
-RUN find /code/scripts -type f -name '*.sh' -exec sed -i 's/\r$//' {} + \
-    && chmod +x /code/scripts/entrypoint.sh
-
-ENTRYPOINT ["/code/scripts/entrypoint.sh"]
+EXPOSE 8000
+CMD ["./dist/rebecca-server"]
