@@ -6,24 +6,26 @@ RUN cd dashboard && \
     npm ci && \
     VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۲: ساخت بک‌اند Go با Python و pipx
+# مرحله ۲: ساخت بک‌اند Go با Python و محیط مجازی
 FROM golang:1.22 AS builder
 WORKDIR /app
 COPY . .
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# نصب Python، pipx
+# نصب Python و ابزارهای مورد نیاز
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv pipx && \
+    apt-get install -y python3 python3-pip python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
-# نصب uv از طریق pipx و اطمینان از PATH
-RUN pipx install uv && pipx ensurepath
+# ایجاد محیط مجازی و نصب uv
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install uv
 
-# اجرای uv از طریق pipx run (مطمئن‌ترین روش)
-RUN pipx run uv sync --group build
+# همگام‌سازی وابستگی‌های build با uv
+RUN uv sync --group build
 
-# اجرای اسکریپت بیلد
+# اجرای اسکریپت بیلد (با PATH محیط مجازی)
 RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
