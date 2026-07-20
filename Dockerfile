@@ -1,4 +1,4 @@
-# مرحله ۱: ساخت فرانت‌اند React (اول)
+# مرحله ۱: ساخت فرانت‌اند React
 FROM node:20 AS frontend-builder
 WORKDIR /app
 COPY dashboard/ dashboard/
@@ -6,26 +6,24 @@ RUN cd dashboard && \
     npm ci && \
     VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۲: ساخت بک‌اند Go (با نصب Python و uv)
+# مرحله ۲: ساخت بک‌اند Go با Python و pipx
 FROM golang:1.22 AS builder
 WORKDIR /app
-# کل کد را کپی کن
 COPY . .
-# ولی قبل از اجرای اسکریپت، داشبورد ساخته‌شده را از مرحله قبل به مسیر درست کپی کن
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# نصب Python، pip، uv و PyInstaller
+# نصب Python، pipx و ابزارهای مورد نیاز
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv && \
+    apt-get install -y python3 python3-pip python3-venv pipx && \
     rm -rf /var/lib/apt/lists/*
 
-# نصب uv (مدیریت وابستگی‌های Python)
-RUN pip3 install uv
+# نصب uv از طریق pipx (ایمن‌ترین روش)
+RUN pipx install uv
 
-# همگام‌سازی وابستگی‌های build (طبق مستندات Rebecca)
+# همگام‌سازی وابستگی‌های build با uv
 RUN uv sync --group build
 
-# حالا اسکریپت بیلد را اجرا کن
+# اجرای اسکریپت بیلد
 RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
