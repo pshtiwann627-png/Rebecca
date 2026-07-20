@@ -10,29 +10,28 @@ WORKDIR /app
 COPY dashboard/ dashboard/
 RUN cd dashboard && npm ci && VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۳: تصویر نهایی (بدون mount، کاملاً سازگار با Railway)
+# مرحله ۳: تصویر نهایی
 FROM debian:bullseye-slim
 WORKDIR /opt/rebecca
 
-# به‌روزرسانی و نصب curl در یک مرحله
 RUN apt-get update && \
     apt-get install -y curl && \
     rm -rf /var/lib/apt/lists/*
 
-# کپی فایل‌های ساخته‌شده
 COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
-COPY .env.example .env
 
-# دسترسی اجرایی
+# تعريف مستقيم متغيرهاى محيطى (بدون نياز به فايل .env)
+ENV SUDO_USERNAME=admin
+ENV SUDO_PASSWORD=admin123
+ENV SQLALCHEMY_DATABASE_URL=sqlite:///var/lib/rebecca/rebecca.db
+ENV UVICORN_HOST=0.0.0.0
+ENV UVICORN_PORT=8000
+ENV REBECCA_GATEWAY_ADDR=0.0.0.0:8000
+
 RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
-
-# نصب Xray
 RUN curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- install
 
-# پورت پیش‌فرض
 EXPOSE 8000
-
-# دستور اجرا
 CMD ["./dist/rebecca-server"]
