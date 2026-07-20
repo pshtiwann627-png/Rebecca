@@ -53,4 +53,4 @@ ENV REBECCA_GATEWAY_ADDR=0.0.0.0:8000
 RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
 
 EXPOSE 8000
-CMD ["./dist/rebecca-server"]
+CMD ["sh", "-c", "./dist/rebecca-server || (echo 'Error occurred' && sleep 3600)"]
