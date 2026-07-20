@@ -12,20 +12,14 @@ WORKDIR /app
 COPY . .
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# نصب Python و ابزارهای مورد نیاز
 RUN apt-get update && \
     apt-get install -y python3 python3-pip python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
-# ایجاد محیط مجازی و نصب uv
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install uv
-
-# همگام‌سازی وابستگی‌های build با uv
 RUN uv sync --group build
-
-# اجرای اسکریپت بیلد (با PATH محیط مجازی)
 RUN bash scripts/build_binary.sh
 
 # مرحله ۳: تصویر نهایی
@@ -33,12 +27,18 @@ FROM debian:bullseye-slim
 WORKDIR /opt/rebecca
 
 RUN apt-get update && \
-    apt-get install -y curl && \
+    apt-get install -y curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
+
+# نصب دستی Xray (بدون systemd)
+RUN curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o /tmp/xray.zip && \
+    unzip /tmp/xray.zip -d /usr/local/bin/ && \
+    rm /tmp/xray.zip && \
+    chmod +x /usr/local/bin/xray
 
 # متغیرهای محیطی
 ENV SUDO_USERNAME=admin
@@ -49,7 +49,6 @@ ENV UVICORN_PORT=8000
 ENV REBECCA_GATEWAY_ADDR=0.0.0.0:8000
 
 RUN chmod +x ./dist/rebecca-server ./dist/rebecca-cli
-RUN curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- install
 
 EXPOSE 8000
 CMD ["./dist/rebecca-server"]
