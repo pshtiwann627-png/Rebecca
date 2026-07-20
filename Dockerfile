@@ -12,16 +12,16 @@ WORKDIR /app
 COPY . .
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# نصب Python، pipx و ابزارهای مورد نیاز
+# نصب Python، pipx
 RUN apt-get update && \
     apt-get install -y python3 python3-pip python3-venv pipx && \
     rm -rf /var/lib/apt/lists/*
 
-# نصب uv از طریق pipx (ایمن‌ترین روش)
-RUN pipx install uv
+# نصب uv از طریق pipx و اطمینان از PATH
+RUN pipx install uv && pipx ensurepath
 
-# همگام‌سازی وابستگی‌های build با uv
-RUN uv sync --group build
+# اجرای uv از طریق pipx run (مطمئن‌ترین روش)
+RUN pipx run uv sync --group build
 
 # اجرای اسکریپت بیلد
 RUN bash scripts/build_binary.sh
