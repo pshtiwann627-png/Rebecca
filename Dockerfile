@@ -1,18 +1,19 @@
-# مرحله ۱: ساخت فرانت‌اند React
+# مرحله ۱: ساخت فرانت‌اند React (با محدودیت حافظه کمتر)
 FROM node:20 AS frontend-builder
 WORKDIR /app
 COPY dashboard/ dashboard/
 RUN cd dashboard && \
-    npm ci && \
+    npm ci --max-old-space-size=512 && \
     VITE_BASE_API=/api/ npm run build -- --outDir=build --assetsDir=statics
 
-# مرحله ۲: ساخت بک‌اند Go با Python و محیط مجازی
+# مرحله ۲: ساخت بک‌اند Go (با حذف کش‌های اضافی)
 FROM golang:1.22 AS builder
 WORKDIR /app
 COPY . .
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-RUN apt-get update && \
+# به‌روزرسانی مخازن و نصب ابزارها در یک مرحله
+RUN apt-get update --fix-missing && \
     apt-get install -y python3 python3-pip python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
@@ -22,11 +23,12 @@ RUN pip install uv
 RUN uv sync --group build
 RUN bash scripts/build_binary.sh
 
-# مرحله ۳: تصویر نهایی
+# مرحله ۳: تصویر نهایی (با نصب Xray از باینری آماده)
 FROM debian:bullseye-slim
 WORKDIR /opt/rebecca
 
-RUN apt-get update && \
+# به‌روزرسانی مخازن و نصب curl/unzip با --fix-missing
+RUN apt-get update --fix-missing && \
     apt-get install -y curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
@@ -34,7 +36,7 @@ COPY --from=builder /app/dist/ ./dist/
 COPY --from=builder /app/scripts/ ./scripts/
 COPY --from=frontend-builder /app/dashboard/build/ ./dashboard/build/
 
-# نصب دستی Xray (بدون systemd)
+# نصب دستی Xray (نسخه‌ی سبک)
 RUN curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o /tmp/xray.zip && \
     unzip /tmp/xray.zip -d /usr/local/bin/ && \
     rm /tmp/xray.zip && \
